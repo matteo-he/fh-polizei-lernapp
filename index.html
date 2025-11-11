@@ -3,34 +3,26 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title> Lerntool E1 / E2a (Single-File)</title>
-
-  <!-- Tailwind CDN -->
+  <title>Lerntool E1 / E2a</title>
+  <!-- Tailwind über CDN -->
   <script src="https://cdn.tailwindcss.com"></script>
-
   <!-- React & ReactDOM UMD -->
   <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
-
-  <!-- Babel (JSX im Browser) -->
+  <!-- Babel (damit JSX direkt im Browser funktioniert) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-  <!-- Chart.js CDN (für Donut + Verlauf) -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 </head>
 <body class="bg-gray-50">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useRef } = React;
+    const { useState, useEffect, useMemo } = React;
 
-    // ========= Utils =========
+    // ========= Utility =========
     function xmur3(str){let h=1779033703^str.length;for(let i=0;i<str.length;i++){h=Math.imul(h^str.charCodeAt(i),3432918353);h=h<<13|h>>>19;}return function(){h=Math.imul(h^h>>>16,2246822507);h=Math.imul(h^h>>>13,3266489909);return (h^h>>>16)>>>0}}
     function mulberry32(a){return function(){var t=a+=0x6D2B79F5;t=Math.imul(t^t>>>15,t|1);t^=t+Math.imul(t^t>>>7,t|61);return ((t^t>>>14)>>>0)/4294967296}}
     function seededShuffle(array, seedStr){const seed=xmur3(seedStr)();const rng=mulberry32(seed);const a=[...array];for(let i=a.length-1;i>0;i--){const j=Math.floor(rng()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a}
-    const todayStr = () => new Date().toISOString().slice(0,10);
 
-    // ========= Farben / Gruppen =========
     const COLOR = {
       BDG: { bg:"bg-yellow-50", border:"border-yellow-400", bar:"bg-yellow-400", grad:"from-yellow-400 to-amber-500", text:"text-yellow-700" },
       SPG: { bg:"bg-blue-50",   border:"border-blue-500",   bar:"bg-blue-500",   grad:"from-blue-600 to-indigo-600", text:"text-blue-700" },
@@ -38,13 +30,13 @@
       StGB:{ bg:"bg-red-50",    border:"border-red-500",    bar:"bg-red-500",    grad:"from-rose-600 to-red-600", text:"text-red-700" },
       ADMIN:{ bg:"bg-green-50",  border:"border-green-600",  bar:"bg-green-600",  grad:"from-emerald-600 to-green-600", text:"text-green-700" },
     };
+
     const GROUPS = [
-      { key:"BDG",   title:"Dienstrecht (BDG)",       tags:["BDG"],                color:COLOR.BDG },
-      { key:"SPG",   title:"Sicherheitspolizei (SPG)",tags:["SPG"],                color:COLOR.SPG },
-      { key:"STPO",  title:"Strafprozess/StGB",       tags:["StPO","StGB"],       color:COLOR.StPO },
-      { key:"ADMIN", title:"Verwaltung & Verkehr",    tags:["AVG","VStG","WaffG","StVO","KFG","FSG"], color:COLOR.ADMIN },
+      { key:"BDG",   title:"Dienstrecht (BDG)",           tags:["BDG"], color:COLOR.BDG },
+      { key:"SPG",   title:"Sicherheitspolizei (SPG)",     tags:["SPG"], color:COLOR.SPG },
+      { key:"STPO",  title:"Strafprozess/StGB",            tags:["StPO","StGB"], color:COLOR.StPO },
+      { key:"ADMIN", title:"Verwaltung & Verkehr",          tags:["AVG","VStG","WaffG","StVO","KFG","FSG"], color:COLOR.ADMIN },
     ];
-    const ALL_TAGS = GROUPS.flatMap(g=>g.tags);
 
     const RANKS = [
       { title: "Anwärter:in", min: 0 },
@@ -54,38 +46,47 @@
       { title: "Abteilungsinspektor:in", min: 1300 },
       { title: "Chefinspektor:in", min: 2000 },
     ];
-    const rankFor = (score)=>[...RANKS].reverse().find(r=>score>=r.min)?.title || RANKS[0].title;
 
-    function ProgressBar({ value, className="" }){
-      // Farbwechsel nach Quote
-      const v = Math.max(0, Math.min(100, value));
-      const barColor = v>=80? "bg-green-600" : v>=50? "bg-yellow-500" : "bg-red-500";
-      return (
-        <div className={`w-full h-2 bg-gray-200 rounded-full overflow-hidden ${className}`}>
-          <div className={`h-2 ${barColor} transition-all`} style={{ width: `${v}%` }} />
-        </div>
-      );
-    }
-    const Chip = ({children, className=""}) => <span className={`px-2 py-1 text-xs rounded-full border mr-2 mb-2 inline-block ${className}`}>{children}</span>;
-
-    // ========= Demo-Fragen (du importierst dann deine JSON) =========
     const DEFAULT_QUESTIONS = [
-      { id: "bdg-44-001", question:"§ 44 BDG: In welchen Fällen ist gegen eine Weisung zu remonstrieren oder darf ihre Befolgung abgelehnt werden?",
-        choices:["Wenn der Inhalt unklar bleibt, obwohl nachgefragt wurde.","Wenn die Befolgung gegen strafrechtliche Vorschriften verstieße.","Wenn sie von einem unzuständigen Organ erteilt wurde.","Wenn die Weisung mündlich erteilt wurde.","Wenn die Befolgung gegen verwaltungsrechtliche Vorschriften verstieße."],
-        correct:[0,1,2,4], explain:"Unzuständigkeit, Rechtswidrigkeit und unklarer Inhalt begründen Remonstration; Mündlichkeit allein nicht.", law_ref:"BDG § 44", tags:["BDG"], last_checked: todayStr(), difficulty:1 },
-      { id:"bdg-39-001", question:"§ 39 BDG (Dienstzuteilung): Wann ist eine Dienstzuteilung ohne schriftliche Zustimmung über 90 Tage zulässig?",
-        choices:["Zur Aufrechterhaltung des Dienstbetriebs.","Zu Ausbildungszwecken.","Bei wichtigen privaten Gründen.","Wenn die Zuteilungsdienststelle zustimmt.","Wenn die entsendende Dienststelle zustimmt."],
-        correct:[0,1], explain:">90 Tage ohne Zustimmung: nur Betriebsnotwendigkeit oder Ausbildung.", law_ref:"BDG § 39", tags:["BDG"], last_checked: todayStr(), difficulty:2 }
+      { id: "bdg-43-ma-1", question:"§ 43 BDG: Wie hat ein Beamter seine dienstlichen Aufgaben zu erfüllen? Wählen Sie alle zutreffenden.", choices:["Unter Beachtung der geltenden Rechtsordnung.","Treu, gewissenhaft, engagiert und unparteiisch.","Nur nach ständiger Rücksprache mit dem unmittelbaren Vorgesetzten.","So, dass das Vertrauen der Allgemeinheit erhalten bleibt.","Primär an interne Dienstanweisungen, nicht an Gesetze, gebunden."], correct:[0,1,3], explain:"§ 43 BDG: Rechtstreue, Gewissenhaftigkeit, Engagement, Unparteilichkeit und Wahrung des Vertrauens der Allgemeinheit.", law_ref:"BDG § 43", tags:["BDG"], last_checked:"2025-11-11", difficulty:1 },
+      { id:"bdg-44-ma-1", question:"§ 44 BDG (Weisungen): In welchen Fällen ist zu remonstrieren/abzulehnen? Wählen Sie alle zutreffenden.", choices:["Wenn die Weisung von einem unzuständigen Organ erteilt wurde.","Wenn die Befolgung gegen verwaltungsrechtliche Vorschriften verstieße.","Wenn die Befolgung gegen strafrechtliche Vorschriften verstieße.","Wenn der Inhalt unklar ist und trotz Nachfrage unklar bleibt.","Wenn die Weisung mündlich erteilt wurde."], correct:[0,1,2,3], explain:"Unzuständigkeit oder Rechtswidrigkeit → Remonstrationspflicht; Mündlichkeit allein macht eine Weisung nicht unbeachtlich.", law_ref:"BDG § 44", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
+      { id:"bdg-43a-ma-1", question:"§ 43a BDG (achtungsvoller Umgang): Welche Aussagen treffen zu? Wählen Sie alle zutreffenden.", choices:["Beamte haben menschenwürdeverletzendes Verhalten zu unterlassen.","Vorgesetzte und Mitarbeiter begegnen einander mit Achtung.","Spontane Entgleisungen sind disziplinär immer irrelevant.","Vorgesetzte haben für achtungsvollen Umgang Sorge zu tragen.","§ 43a betrifft nur den Umgang mit Parteien."], correct:[0,1,3], explain:"§ 43a BDG verlangt würdevollen, diskriminierungsfreien Umgang; spontane Entgleisungen können relevant sein.", law_ref:"BDG § 43a", tags:["BDG"], last_checked:"2025-11-11", difficulty:1 },
+      { id:"bdg-39-ma-1", question:"§ 39 BDG (Dienstzuteilung): Unter welchen Bedingungen ist eine Zuteilung ohne schriftliche Zustimmung über 90 Tage zulässig? Wählen Sie alle zutreffenden.", choices:["Wenn der Dienstbetrieb auf andere Weise nicht aufrechterhalten werden kann.","Wenn sie zum Zwecke einer Ausbildung erfolgt.","Wenn wichtige private Gründe vorliegen.","Wenn der Kommandant der entsendenden Dienststelle zustimmt.","Wenn der Kommandant der Zuteilungsdienststelle zustimmt."], correct:[0,1], explain:">90 Tage ohne Zustimmung: nur zur Aufrechterhaltung des Dienstbetriebs oder zu Ausbildungszwecken.", law_ref:"BDG § 39", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
     ];
 
-    // ========= Local Storage Helpers =========
+    // ========= Helpers =========
     function useLocalStorage(key, initial){
       const [state,setState]=useState(()=>{try{const s=localStorage.getItem(key);return s?JSON.parse(s):initial;}catch{return initial;}});
       useEffect(()=>{try{localStorage.setItem(key,JSON.stringify(state));}catch{}},[key,state]);
       return [state,setState];
     }
 
-    // Persistente Fragenbank
+    function rankFor(score){const r=[...RANKS].reverse().find(r=>score>=r.min);return r? r.title : RANKS[0].title}
+
+    function ProgressBar({ value, className="" }){
+      return (
+        <div className={`w-full h-2 bg-gray-200 rounded-full overflow-hidden ${className}`}>
+          <div className="h-2 bg-blue-600 transition-all" style={{ width: `${Math.min(100, Math.max(0, value))}%` }} />
+        </div>
+      );
+    }
+
+    function Chip({ children, className="" }){
+      return <span className={`px-2 py-1 text-xs rounded-full border mr-2 mb-2 inline-block ${className}`}>{children}</span>;
+    }
+
+    // Tiers
+    const MIN_TIER=1, MAX_TIER=5;
+    const getTierMap=()=>{try{return JSON.parse(localStorage.getItem('tiers')||'{}')}catch{return{}}};
+    const setTierMap=(m)=>{try{localStorage.setItem('tiers',JSON.stringify(m))}catch{}};
+    const getTier=(id)=>{const m=getTierMap();return m[id]||2};
+    const setTier=(id,t)=>{const m=getTierMap();m[id]=Math.max(MIN_TIER,Math.min(MAX_TIER,t));setTierMap(m)};
+    const tierWeight=(tier)=>({1:5,2:3,3:2,4:1.2,5:1}[tier]||1);
+    function weightedOrder(items){return [...items].map(x=>({x,k:Math.random()**(1/tierWeight(getTier(x.id)))})).sort((a,b)=>b.k-a.k).map(o=>o.x)}
+
+    const getDisplayOrder=(qid,idx)=> seededShuffle([0,1,2,3,4], `${qid}#${idx}`);
+
+    // Fragen-State (für echten Import/Export ersetzbar)
     function useQuestions(){
       const [questions, setQuestions] = React.useState(() => {
         try {
@@ -99,178 +100,43 @@
       return { questions, setQuestions };
     }
 
-    // ========= Lernmetriken (persistiert) =========
-    const emptyMetrics = () => ({
-      totalAttempts: 0,
-      totalCorrect: 0,
-      attemptedIds: {},     // id -> count
-      correctIds: {},       // id -> count (exakt richtig)
-      perTag: Object.fromEntries(ALL_TAGS.map(t=>[t,{attempts:0, correct:0}])),
-      daily: {},            // YYYY-MM-DD -> {attempts, correct}
-      secondsLearned: 0
-    });
-    function loadMetrics(){
-      try { return JSON.parse(localStorage.getItem("metrics_v2") || "null") || emptyMetrics(); }
-      catch { return emptyMetrics(); }
-    }
-    function saveMetrics(m){ try{ localStorage.setItem("metrics_v2", JSON.stringify(m)); }catch{} }
-
-    // ========= Spaced Repetition (Tiers) =========
-    const MIN_TIER=1, MAX_TIER=5;
-    const getTierMap=()=>{try{return JSON.parse(localStorage.getItem('tiers')||'{}')}catch{return{}}};
-    const setTierMap=(m)=>{try{localStorage.setItem('tiers',JSON.stringify(m))}catch{}};
-    const getTier=(id)=>{const m=getTierMap();return m[id]||2};
-    const setTier=(id,t)=>{const m=getTierMap();m[id]=Math.max(MIN_TIER,Math.min(MAX_TIER,t));setTierMap(m)};
-    const tierWeight=(tier)=>({1:5,2:3,3:2,4:1.2,5:1}[tier]||1);
-    function weightedOrder(items){return [...items].map(x=>({x,k:Math.random()**(1/tierWeight(getTier(x.id)))})).sort((a,b)=>b.k-a.k).map(o=>o.x)}
-    const getDisplayOrder=(qid,idx)=> seededShuffle([0,1,2,3,4], `${qid}#${idx}`);
-
-    // ========= Chart Komponente =========
-    function DoughnutChart({ correct, wrong, open }){
-      const ref = useRef(null);
-      useEffect(()=>{
-        const ctx = ref.current.getContext('2d');
-        const chart = new Chart(ctx, {
-          type: 'doughnut',
-          data: {
-            labels: ['Richtig','Falsch','Offen'],
-            datasets: [{ data: [correct, wrong, open] }]
-          },
-          options: {
-            plugins: { legend: { display: true, position: 'bottom' } },
-            responsive: true,
-            cutout: '60%'
-          }
-        });
-        return ()=> chart.destroy();
-      }, [correct, wrong, open]);
-      return <canvas ref={ref} height="140"></canvas>;
-    }
-
-    function Sparkline({ points=[] }){
-      const ref = useRef(null);
-      useEffect(()=>{
-        const labels = points.map(p=>p.d.slice(5)); // MM-DD
-        const dataA = points.map(p=>p.a);
-        const dataC = points.map(p=>p.c);
-        const ctx = ref.current.getContext('2d');
-        const chart = new Chart(ctx, {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [
-              { label:'Versuche', data:dataA, fill:false, tension:0.3 },
-              { label:'Richtig',  data:dataC, fill:false, tension:0.3 }
-            ]
-          },
-          options: {
-            plugins: { legend: { display: true, position: 'bottom' } },
-            responsive: true
-          }
-        });
-        return ()=> chart.destroy();
-      }, [points]);
-      return <canvas ref={ref} height="160"></canvas>;
-    }
-
-    // ========= Dashboard Karten =========
-    function StatCard({ title, value, sub="" }){
-      return (
-        <div className="rounded-2xl p-4 bg-white shadow">
-          <div className="text-xs text-gray-500">{title}</div>
-          <div className="text-2xl font-bold mt-1">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
-        </div>
-      );
-    }
-
-    function TopicProgress({ questions, metrics }){
-      // Aggregiere je Gruppe
-      const groups = GROUPS.map(g=>{
-        const ids = questions.filter(q=>q.tags.some(t=>g.tags.includes(t))).map(q=>q.id);
-        const attempts = ids.reduce((sum,id)=> sum + (metrics.attemptedIds[id]||0), 0);
-        const correct  = ids.reduce((sum,id)=> sum + (metrics.correctIds[id]||0), 0);
-        const total    = ids.length;
-        const uniqueAttempted = ids.filter(id=> (metrics.attemptedIds[id]||0) > 0).length;
-        const coverage = total? Math.round((uniqueAttempted/total)*100):0;
-        const acc = attempts? Math.round((correct/attempts)*100):0;
-        return { key:g.key, title:g.title, color:g.color, total, attempts, correct, coverage, acc };
-      });
-
-      return (
-        <div className="grid md:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-4">
-          {groups.map(c=>(
-            <div key={c.key} className={`rounded-2xl p-4 border shadow ${c.color.bg} ${c.color.border}`}>
-              <div className={`text-sm font-semibold ${c.color.text}`}>{c.title}</div>
-              <div className="mt-1 text-xs text-gray-600">Fragen gesamt: {c.total}</div>
-              <div className="mt-3">
-                <div className="text-xs mb-1">Abdeckung (einmal gesehen)</div>
-                <div className="w-full h-2 bg-white/70 rounded-full overflow-hidden border">
-                  <div className={`h-2 ${c.color.bar}`} style={{ width: `${c.coverage}%`}} />
-                </div>
-              </div>
-              <div className="mt-2">
-                <div className="text-xs mb-1">Trefferquote</div>
-                <div className="w-full h-2 bg-white/70 rounded-full overflow-hidden border">
-                  <div className={`h-2 ${c.color.bar}`} style={{ width: `${c.acc}%`}} />
-                </div>
-              </div>
-              <div className="mt-2 text-xs text-gray-600">Versuche: {c.attempts} · Richtig: {c.correct}</div>
-            </div>
-          ))}
-        </div>
-      );
-    }
-
-    function MissionControl({ questions, metrics, score, streak }){
-      const total = questions.length;
-      const attemptedUnique = Object.keys(metrics.attemptedIds).length;
-      const open = Math.max(0, total - attemptedUnique);
-      const attempts = metrics.totalAttempts;
-      const correct = metrics.totalCorrect;
-      const wrong = Math.max(0, attempts - correct);
-      const accuracy = attempts? Math.round((correct/attempts)*100) : 0;
-      const errorRate = attempts? (100 - accuracy) : 0;
-      const rank = rankFor(score);
-
-      // Verlauf letzte 7 Tage
-      const last7 = [];
-      for(let i=6;i>=0;i--){
-        const d = new Date(); d.setDate(d.getDate()-i);
-        const key = d.toISOString().slice(0,10);
-        const day = metrics.daily[key] || {attempts:0, correct:0};
-        last7.push({ d:key, a:day.attempts, c:day.correct });
-      }
-
+    function Dashboard({ stats, rank, score, reviewCount }){
+      const cards = GROUPS.map(g=>({ ...stats[g.key], key:g.key }));
       return (
         <div className="space-y-6">
-          <div className="grid lg:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-4">
-            <StatCard title="Trefferquote" value={`${accuracy}%`} sub={`Fehlerquote ${errorRate}%`} />
-            <StatCard title="Gesamt beantwortet" value={attempts} sub={`Richtig ${correct} · Falsch ${wrong}`} />
-            <StatCard title="Streak" value={`${streak} 🔥`} sub="in Folge richtig" />
-            <StatCard title="Rang" value={rank} sub={`${score} XP`} />
+          <div className="grid md:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-4">
+            {cards.map(c=>{
+              const attemptedPct = c.total? Math.round((c.attempted/c.total)*100):0;
+              const correctPct   = c.attempted? Math.round((c.correct/c.attempted)*100):0;
+              return (
+                <div key={c.key} className={`rounded-2xl p-4 border shadow ${c.color.bg} ${c.color.border}`}>
+                  <div className={`text-sm font-semibold ${c.color.text}`}>{GROUPS.find(g=>g.key===c.key).title}</div>
+                  <div className="mt-2 text-xs text-gray-600">Fragen: {c.total} · Bearbeitet: {c.attempted} · Richtig: {c.correct}</div>
+                  <div className="mt-3">
+                    <div className="text-xs mb-1">Abdeckung</div>
+                    <div className="w-full h-2 bg-white/70 rounded-full overflow-hidden border">
+                      <div className={`h-2 ${c.color.bar}`} style={{ width: `${attemptedPct}%`}} />
+                    </div>
+                  </div>
+                  <div className="mt-2">
+                    <div className="text-xs mb-1">Trefferquote</div>
+                    <div className="w-full h-2 bg-white/70 rounded-full overflow-hidden border">
+                      <div className={`h-2 ${c.color.bar}`} style={{ width: `${correctPct}%`}} />
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
           </div>
-
-          <div className="grid md:grid-cols-2 gap-4">
-            <div className="rounded-2xl p-4 bg-white shadow">
-              <div className="text-sm font-semibold mb-2">Übersicht Richtig/Falsch/Offen</div>
-              <DoughnutChart correct={correct} wrong={wrong} open={open}/>
-            </div>
-            <div className="rounded-2xl p-4 bg-white shadow">
-              <div className="text-sm font-semibold mb-2">Deine Lernkurve (7 Tage)</div>
-              <Sparkline points={last7}/>
-            </div>
-          </div>
-
-          <div className="rounded-2xl p-4 bg-white shadow">
-            <div className="text-sm font-semibold mb-3">Themen-Fortschritt</div>
-            <TopicProgress questions={questions} metrics={metrics}/>
+          <div className="grid md:grid-cols-3 gap-4">
+            <div className="rounded-2xl p-4 bg-white shadow"><div className="text-xs text-gray-500">Aktueller Rang</div><div className="text-2xl font-bold mt-1">{rank}</div></div>
+            <div className="rounded-2xl p-4 bg-white shadow"><div className="text-xs text-gray-500">Gesamtpunkte</div><div className="text-2xl font-bold mt-1">{score}</div></div>
+            <div className="rounded-2xl p-4 bg-white shadow"><div className="text-xs text-gray-500">Wiederholungs-Queue</div><div className="text-2xl font-bold mt-1">{reviewCount}</div></div>
           </div>
         </div>
       );
     }
 
-    // ========= Fragekarte =========
     function QuestionCard({ q, idx, submitted, onSubmit, onNext }){
       const [selectedDisplay, setSelectedDisplay] = useState([]);
       const displayOrder = useMemo(()=> getDisplayOrder(q.id, idx), [q.id, idx]);
@@ -278,7 +144,6 @@
       const toggle = (dispIdx) => setSelectedDisplay(prev => prev.includes(dispIdx)? prev.filter(x=>x!==dispIdx):[...prev, dispIdx]);
       const correctSet = new Set(q.correct);
       const group = GROUPS.find(g=>q.tags.some(t=>g.tags.includes(t))) || GROUPS[GROUPS.length-1];
-
       return (
         <div className="bg-white rounded-2xl shadow p-0 overflow-hidden">
           <div className={`h-2 w-full bg-gradient-to-r ${group.color.grad}`} />
@@ -331,10 +196,9 @@
       );
     }
 
-    // ========= App =========
     function App(){
       const { questions: QUESTIONS, setQuestions } = useQuestions();
-      const [view, setView] = useLocalStorage("view","dashboard"); // 'dashboard' | 'train'
+      const [view, setView] = useLocalStorage("view","dashboard");
       const [mode, setMode] = useLocalStorage("mode","training");
       const [seed, setSeed] = useState(0);
       const [filter, setFilter] = useLocalStorage("filter", { tags: [], difficulty: 0 });
@@ -343,15 +207,6 @@
       const [streak, setStreak] = useLocalStorage("streak", 0);
       const [idx, setIdx] = useLocalStorage("idx", 0);
       const [showExplain, setShowExplain] = useState(false);
-      const [metrics, setMetrics] = useState(loadMetrics());
-
-      // Lernzeit (grob): pro sichtbarer Frage ~5s; hier tickend
-      useEffect(()=>{
-        const t = setInterval(()=>{
-          const m = {...metrics}; m.secondsLearned += 1; setMetrics(m); saveMetrics(m);
-        }, 1000);
-        return ()=> clearInterval(t);
-      }, [metrics]);
 
       const pool = useMemo(()=>{
         let p=QUESTIONS;
@@ -368,47 +223,30 @@
         const displayOrder=getDisplayOrder(current.id,idx);
         const toOriginal=(i)=>displayOrder[i];
         const selectedOriginalIdx=selectedDisplayIdx.map(toOriginal);
-
         const correctSet=new Set(current.correct);
         const selectedSet=new Set(selectedOriginalIdx);
         const allOptions=current.choices.map((_,i)=>i);
         const isExact=allOptions.every(i=>correctSet.has(i)===selectedSet.has(i));
-
-        // Update Tiers + Punkte
+        setShowExplain(true);
         const curTier=getTier(current.id);
         if(isExact){ setScore(s=>s+10); setStreak(s=>s+1); setReview(r=>r.filter(id=>id!==current.id)); setTier(current.id,curTier+1); }
         else { setStreak(0); setReview(r=>(r.includes(current.id)?r:[...r,current.id])); setTier(current.id,curTier-1); }
-
-        // Update Metrics
-        const m = loadMetrics();
-        m.totalAttempts += 1;
-        if(isExact) m.totalCorrect += 1;
-        m.attemptedIds[current.id] = (m.attemptedIds[current.id]||0) + 1;
-        if(isExact) m.correctIds[current.id] = (m.correctIds[current.id]||0) + 1;
-        current.tags.forEach(t=>{
-          if(!m.perTag[t]) m.perTag[t] = {attempts:0, correct:0};
-          m.perTag[t].attempts += 1;
-          if(isExact) m.perTag[t].correct += 1;
-        });
-        const d = todayStr();
-        if(!m.daily[d]) m.daily[d] = { attempts:0, correct:0 };
-        m.daily[d].attempts += 1;
-        if(isExact) m.daily[d].correct += 1;
-
-        saveMetrics(m); setMetrics(m);
-
-        setShowExplain(true);
       }
-      function next(){ setIdx(i=>i+1); setShowExplain(false); }
-      const progress=((idx % (pool.length||1))/(pool.length||1))*100;
+      function next(){ setIdx(i=>i+1); setShowExplain(false);} 
+      const progress=((idx % (pool.length||1))/(pool.length||1))*100; const rank=rankFor(score);
+
+      const stats = useMemo(()=>{
+        const result={}; for(const g of GROUPS){ result[g.key]={ total:0, attempted:0, correct:0, color:g.color, title:g.title }; }
+        for(const q of QUESTIONS){ const group = GROUPS.find(g=>q.tags.some(t=>g.tags.includes(t))) || GROUPS[GROUPS.length-1]; const key = group.key; result[key].total++; }
+        return result;
+      },[QUESTIONS]);
 
       return (
-        <div className="max-w-6xl mx-auto p-6">
-          {/* Header */}
+        <div className="max-w-5xl mx-auto p-6">
           <header className="mb-6">
             <div className="rounded-2xl p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow flex flex-wrap items-center gap-4 justify-between">
               <div>
-                <h1 className="text-2xl font-bold">FH WN – Polizeiliche Führung</h1>
+                <h1 className="text-2xl font-bold">Lerntool E1 / E2a</h1>
                 <p className="text-sm opacity-90">Prüfungsrealistisches MC-Training · 5 Optionen · Mehrfachauswahl · Antwortmischung · Spaced Repetition</p>
               </div>
               <div className="flex gap-2">
@@ -418,55 +256,47 @@
             </div>
           </header>
 
-          {view==='dashboard' && (
-            <MissionControl questions={QUESTIONS} metrics={metrics} score={score} streak={streak} />
-          )}
+          {view==='dashboard' && (<Dashboard stats={stats} rank={rank} score={score} reviewCount={0} />)}
 
           {view==='train' && (
             <>
+              {/* Kompakte Stats im Training */}
+              <div className="mb-4 grid lg:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-4">
+                <StatCard title="Trefferquote" value={`${metrics.totalAttempts? Math.round((metrics.totalCorrect/metrics.totalAttempts)*100):0}%`} sub={`Richtig ${metrics.totalCorrect} · Falsch ${Math.max(0, metrics.totalAttempts - metrics.totalCorrect)}`} />
+                <StatCard title="Beantwortet gesamt" value={metrics.totalAttempts} sub={`${Object.keys(metrics.attemptedIds||{}).length} unterschiedliche Fragen`} />
+                <StatCard title="Streak" value={`${streak} 🔥`} sub="in Folge richtig" />
+                <StatCard title="Rang" value={rankFor(score)} sub={`${score} XP`} />
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
                 <div className="p-4 bg-white rounded-2xl shadow">
                   <div className="text-xs text-gray-500">Modus</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {["training","exam","mission"].map(val => (
-                      <button key={val} onClick={() => setMode(val)} className={`px-3 py-1 rounded-full border ${mode===val?"bg-blue-600 text-white":"bg-white"}`}>{val}</button>
+                      <button key={val} onClick={() => {localStorage.setItem('mode', JSON.stringify(val));}} className={`px-3 py-1 rounded-full border ${JSON.parse(localStorage.getItem('mode')||'"training"')===val?"bg-blue-600 text-white":"bg-white"}`}>{val}</button>
                     ))}
                   </div>
                 </div>
                 <div className="p-4 bg-white rounded-2xl shadow">
                   <div className="text-xs text-gray-500">Filter</div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    {ALL_TAGS.map(t => (
-                      <button key={t} onClick={() => setFilter(f => ({...f, tags: f.tags.includes(t)? f.tags.filter(x=>x!==t):[...f.tags,t]}))}
-                        className={`px-3 py-1 rounded-full border ${filter.tags.includes(t)?"bg-blue-100 border-blue-400":"bg-white"}`}>{t}</button>
+                    {GROUPS.flatMap(g=>g.tags).filter((v,i,a)=>a.indexOf(v)===i).map(t => (
+                      <button key={t} onClick={() => {
+                        const f = JSON.parse(localStorage.getItem('filter')||'{"tags":[],"difficulty":0}');
+                        const exists = f.tags.includes(t);
+                        const tags = exists? f.tags.filter(x=>x!==t) : [...f.tags,t];
+                        localStorage.setItem('filter', JSON.stringify({...f,tags}));
+                        location.reload();
+                      }} className={`px-3 py-1 rounded-full border ${ (JSON.parse(localStorage.getItem('filter')||'{"tags":[],"difficulty":0}').tags||[]).includes(t)?"bg-blue-100 border-blue-400":"bg-white"}`}>{t}</button>
                     ))}
-                    <select className="ml-auto px-2 py-1 border rounded-full" value={filter.difficulty||0}
-                      onChange={e=>setFilter(f=>({...f, difficulty: Number(e.target.value)}))}>
-                      <option value={0}>Alle Schwierigkeitsgrade</option>
-                      <option value={1}>Leicht</option>
-                      <option value={2}>Mittel</option>
-                      <option value={3}>Schwer</option>
-                    </select>
                   </div>
                 </div>
                 <div className="p-4 bg-white rounded-2xl shadow">
                   <div className="text-xs text-gray-500">Einstellungen</div>
                   <div className="mt-2 flex flex-wrap gap-2">
-                    <button className="px-3 py-1 rounded-lg border" onClick={()=>{
-                      ['tiers','answers','score','streak','idx','review','filter','mode','questions','metrics_v2'].forEach(k=>localStorage.removeItem(k));
-                      alert('Zurückgesetzt. Seite lädt neu.'); location.reload();
-                    }}>Fortschritt zurücksetzen</button>
+                    <button className="px-3 py-1 rounded-lg border" onClick={()=>{ ['tiers','answers','score','streak','idx','review','filter','mode','questions'].forEach(k=>localStorage.removeItem(k)); alert('Zurückgesetzt. Seite lädt neu.'); location.reload(); }}>Fortschritt zurücksetzen</button>
                   </div>
                 </div>
-              </div>
-
-              {/* Fortschrittsleiste im aktuellen Übungs-Pool */}
-              <div className="mb-4 bg-white rounded-2xl shadow p-4">
-                <div className="flex items-center justify-between text-sm mb-2">
-                  <span>Übungs-Fortschritt in aktuellem Pool</span>
-                  <span>{Math.round(progress)}%</span>
-                </div>
-                <ProgressBar value={progress}/>
               </div>
 
               {current ? (
@@ -481,7 +311,7 @@
                 <div className="flex gap-2 flex-wrap">
                   <button className="px-3 py-2 rounded-lg border" onClick={() => {
                     const blob = new Blob([JSON.stringify(QUESTIONS, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'fragenbank.json'; a.click(); URL.revokeObjectURL(url);
+                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'fragenbank-demo.json'; a.click(); URL.revokeObjectURL(url);
                   }}>Export</button>
 
                   <label className="px-3 py-2 rounded-lg border cursor-pointer">Import
@@ -489,13 +319,9 @@
                       const file=e.target.files?.[0]; if(!file) return; const text=await file.text();
                       try{
                         const data=JSON.parse(text);
-                        const ok = Array.isArray(data) && data.every(q =>
-                          q && typeof q.id==="string" && typeof q.question==="string" &&
-                          Array.isArray(q.choices) && q.choices.length===5 &&
-                          Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) &&
-                          Array.isArray(q.tags)
-                        );
+                        const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) && Array.isArray(q.tags));
                         if(!ok){ alert('Ungültiges Format.'); return; }
+                        // In dieser Single-File-Demo ersetzen wir die DEFAULT_QUESTIONS nur im Speicher
                         setQuestions(data);
                         alert(`Import erfolgreich: ${data.length} Fragen übernommen.`);
                       }catch{ alert('Ungültiges JSON'); }
@@ -505,12 +331,15 @@
               </div>
             </>
           )}
-
-          <footer className="text-xs text-gray-500 mt-8 mb-4 text-center">
-            Stand: {new Date().toISOString().slice(0,10)} · Antwortmischung aktiv · Spaced Repetition (Tiers 1–5) · Farbcode je Rechtsgebiet
-          </footer>
         </div>
       );
+    }
+
+    // Fragenquelle zur Laufzeit: priorisiere Import
+    function Root(){
+      const [useImported, setUseImported] = useState(false);
+      useEffect(()=>{ if (window._IMPORTED_QUESTIONS) setUseImported(true); },[]);
+      return <App initialImported={useImported} />
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
