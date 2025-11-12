@@ -133,10 +133,15 @@
         try{
           const saved = JSON.parse(localStorage.getItem("users") || "null");
           if(Array.isArray(saved) && saved.length){
-            return saved;
+            const sanitized = saved
+              .filter(u => u && typeof u.id === "string" && typeof u.username === "string" && typeof u.passwordHash === "string")
+              .map(u => ({ ...u, role: u.role === "admin" ? "admin" : "user" }));
+            const cleaned = sanitized.filter(u => !(u.username === "Admin" && u.role === "admin" && u.passwordHash === hashPassword("admin")));
+            if(cleaned.length) return cleaned;
+            if(sanitized.length) return [];
           }
         }catch{}
-        return [{ id:"admin", username:"Admin", passwordHash:hashPassword("admin"), role:"admin" }];
+        return [];
       });
       useEffect(()=>{
         try{ localStorage.setItem("users", JSON.stringify(users)); }catch{}
@@ -330,7 +335,7 @@
       const [password, setPassword] = useState("");
       const [adminCode, setAdminCode] = useState("");
       const [error, setError] = useState("");
-      const [info, setInfo] = useState("Standard-Admin: Benutzername \"Admin\", Passwort \"admin\".");
+      const [info, setInfo] = useState("");
 
       const handleLogin = (e) => {
         e.preventDefault();
@@ -404,23 +409,26 @@
               {info && !error && <div className="text-xs text-gray-500 dark:text-gray-400">{info}</div>}
               <button type="submit" className="w-full px-3 py-2 rounded-lg bg-blue-600 text-white">{mode==='login' ? 'Anmelden' : 'Profil anlegen'}</button>
             </form>
-            <div className="mt-6">
-              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Vorhandene Profile</div>
-              <div className="flex flex-wrap gap-2 mt-2">
-                {users.map(u => (
-                  <span key={u.id} className="px-2 py-1 rounded-full border text-xs dark:border-gray-600">
-                    {u.username}{u.role==='admin' ? ' · Admin' : ''}
-                  </span>
-                ))}
+            {users.length > 0 && (
+              <div className="mt-6">
+                <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Vorhandene Profile</div>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {users.map(u => (
+                    <span key={u.id} className="px-2 py-1 rounded-full border text-xs dark:border-gray-600">
+                      {u.username}{u.role==='admin' ? ' · Admin' : ''}
+                    </span>
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
       );
     }
 
     function UserSwitcher({ users, activeUser, onLogout, onSwitch }){
-      const others = users.filter(u => u.id !== activeUser.id);
+      const canSwitchProfiles = activeUser.role === 'admin';
+      const others = canSwitchProfiles ? users.filter(u => u.id !== activeUser.id) : [];
       return (
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
           <div>
@@ -431,13 +439,85 @@
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {others.map(u => (
+            {canSwitchProfiles && others.map(u => (
               <button key={u.id} onClick={()=>onSwitch(u.id)} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">
                 Wechsel zu {u.username}{u.role==='admin' ? ' ⭐' : ''}
               </button>
             ))}
             <button onClick={onLogout} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">Abmelden</button>
           </div>
+        </div>
+      );
+    }
+
+    function PasswordChangeForm({ activeUser, onUpdatePassword }){
+      const [current, setCurrent] = useState("");
+      const [next, setNext] = useState("");
+      const [confirm, setConfirm] = useState("");
+      const [message, setMessage] = useState("");
+      const [error, setError] = useState("");
+
+      useEffect(() => {
+        if(!message) return;
+        const t = setTimeout(() => setMessage(""), 4000);
+        return () => clearTimeout(t);
+      }, [message]);
+
+      useEffect(() => {
+        if(!error) return;
+        const t = setTimeout(() => setError(""), 4000);
+        return () => clearTimeout(t);
+      }, [error]);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        setError("");
+        setMessage("");
+
+        if(!passwordsMatch(activeUser.passwordHash, current)){
+          setError("Aktuelles Passwort ist falsch.");
+          return;
+        }
+        if(next.length < 4){
+          setError("Neues Passwort muss mindestens 4 Zeichen haben.");
+          return;
+        }
+        if(next !== confirm){
+          setError("Bestätigung stimmt nicht mit dem neuen Passwort überein.");
+          return;
+        }
+
+        onUpdatePassword(next);
+        setMessage("Passwort erfolgreich aktualisiert.");
+        setCurrent("");
+        setNext("");
+        setConfirm("");
+      };
+
+      return (
+        <div className="w-full bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6 mb-6">
+          <h2 className="text-lg font-semibold mb-4">Passwort ändern</h2>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1">Aktuelles Passwort</label>
+              <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" required />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div>
+                <label className="block text-sm font-medium mb-1">Neues Passwort</label>
+                <input type="password" value={next} onChange={e=>setNext(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" required />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Neues Passwort bestätigen</label>
+                <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" required />
+              </div>
+            </div>
+            {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
+            {message && !error && <div className="text-sm text-green-600 dark:text-green-400">{message}</div>}
+            <div className="flex justify-end">
+              <button type="submit" className="px-3 py-2 rounded-lg bg-blue-600 text-white">Passwort speichern</button>
+            </div>
+          </form>
         </div>
       );
     }
@@ -615,7 +695,7 @@
       );
     }
 
-    function UserApp({ activeUser, users, setActiveUserId, theme, setTheme, questions, setQuestions }){
+    function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions }){
       const userId = activeUser.id;
       const [view, setView] = useUserLocalStorage(userId, "view", "dashboard");
       const [mode, setMode] = useUserLocalStorage(userId, "mode", "training");
@@ -636,6 +716,10 @@
           setView('dashboard');
         }
       }, [view, activeUser.role, setView]);
+
+      const updatePassword = useCallback((newPassword) => {
+        setUsers(prev => prev.map(u => u.id === activeUser.id ? { ...u, passwordHash: hashPassword(newPassword) } : u));
+      }, [activeUser.id, setUsers]);
 
       const safeFilterRaw = (filter && typeof filter === 'object') ? filter : cloneValue(DEFAULT_FILTER);
       const filterTags = Array.isArray(safeFilterRaw.tags) ? safeFilterRaw.tags : [];
@@ -771,6 +855,8 @@
         <div className="max-w-5xl mx-auto p-6 space-y-6">
           <UserSwitcher users={users} activeUser={activeUser} onLogout={()=>setActiveUserId(null)} onSwitch={setActiveUserId} />
 
+          <PasswordChangeForm activeUser={activeUser} onUpdatePassword={updatePassword} />
+
           <header className="mb-2">
             <div className="rounded-2xl p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow flex flex-wrap items-center gap-4 justify-between">
               <div>
@@ -883,7 +969,7 @@
         return <UserAuthPanel users={users} setUsers={setUsers} onLogin={setActiveUserId} theme={theme} setTheme={setTheme} />;
       }
 
-      return <UserApp activeUser={activeUser} users={users} setActiveUserId={setActiveUserId} theme={theme} setTheme={setTheme} questions={questions} setQuestions={setQuestions} />;
+      return <UserApp activeUser={activeUser} users={users} setUsers={setUsers} setActiveUserId={setActiveUserId} theme={theme} setTheme={setTheme} questions={questions} setQuestions={setQuestions} />;
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
