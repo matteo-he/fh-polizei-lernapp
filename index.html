@@ -90,7 +90,8 @@
           if(id === DEFAULT_ADMIN_USER.id){
             return { ...DEFAULT_ADMIN_USER, username, passwordHash, role:"admin" };
           }
-          return { id, username, passwordHash, role:"user" };
+          const role = item.role === "admin" ? "admin" : "user";
+          return { id, username, passwordHash, role };
         })
         .filter(Boolean);
 
