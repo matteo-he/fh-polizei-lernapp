@@ -749,6 +749,8 @@
       const [tierMap, setTierMap] = useUserLocalStorage(userId, "tiers", {});
       const [seed, setSeed] = useState(0);
       const [showExplain, setShowExplain] = useState(false);
+      const [lockedQuestion, setLockedQuestion] = useState(null);
+      const [lockedIdx, setLockedIdx] = useState(null);
 
       useEffect(()=>{ setShowExplain(false); }, [idx, userId]);
 
@@ -798,6 +800,32 @@
       }, [questions, safeFilter, mode, seed, getTier]);
 
       const current = pool.length ? pool[idx % pool.length] : null;
+      const lockedQuestionId = lockedQuestion ? lockedQuestion.id : null;
+
+      useEffect(() => {
+        if(!showExplain){
+          setLockedQuestion(null);
+          setLockedIdx(null);
+        }
+      }, [showExplain]);
+
+      useEffect(() => {
+        if(!pool.length){
+          setLockedQuestion(null);
+          setLockedIdx(null);
+          setShowExplain(false);
+          return;
+        }
+        if(showExplain && lockedQuestionId){
+          const exists = pool.some(q => q.id === lockedQuestionId);
+          if(!exists){
+            setLockedQuestion(null);
+            setLockedIdx(null);
+            setShowExplain(false);
+          }
+        }
+      }, [pool, showExplain, lockedQuestionId]);
+
       const rank = rankFor(score || 0);
       const progress = pool.length ? ((idx % pool.length) / pool.length) * 100 : 0;
 
@@ -817,7 +845,7 @@
       }, [questions, safeMetrics]);
 
       const submitAnswer = (selectedDisplayIdx) => {
-        if(!current) return;
+        if(!current || showExplain) return;
         const displayOrder = getDisplayOrder(current.id, idx);
         const toOriginal = (i) => displayOrder[i];
         const selectedOriginalIdx = selectedDisplayIdx.map(toOriginal);
@@ -825,6 +853,8 @@
         const selectedSet = new Set(selectedOriginalIdx);
         const allOptions = current.choices.map((_,i)=>i);
         const isExact = allOptions.every(i=>correctSet.has(i)===selectedSet.has(i));
+        setLockedQuestion(cloneValue(current));
+        setLockedIdx(idx);
         setShowExplain(true);
         if(isExact){
           setScore(s=> (s || 0) + 10);
@@ -860,6 +890,8 @@
       };
 
       const next = () => {
+        setLockedQuestion(null);
+        setLockedIdx(null);
         setIdx(i => (i || 0) + 1);
         setShowExplain(false);
       };
@@ -891,6 +923,8 @@
       };
 
       const uniqueTags = Array.from(new Set(GROUPS.flatMap(g=>g.tags)));
+      const activeQuestion = showExplain && lockedQuestion ? lockedQuestion : current;
+      const activeIdx = showExplain && lockedIdx !== null ? lockedIdx : idx;
 
       return (
         <div className="max-w-5xl mx-auto p-6 space-y-6">
@@ -953,8 +987,8 @@
                 </div>
               </div>
 
-              {current ? (
-                <QuestionCard q={current} idx={idx} submitted={showExplain} onSubmit={submitAnswer} onNext={next} getTier={getTier} />
+              {activeQuestion ? (
+                <QuestionCard q={activeQuestion} idx={activeIdx} submitted={showExplain} onSubmit={submitAnswer} onNext={next} getTier={getTier} />
               ) : (
                 <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">Keine Fragen im aktuellen Filter.</div>
               )}
