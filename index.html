@@ -17,7 +17,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo, useCallback } = React;
+    const { useState, useEffect, useMemo, useCallback, useContext } = React;
 
     // ========= Utility =========
     function xmur3(str){
@@ -54,8 +54,8 @@
     }
 
     function cloneValue(value){
-      if (Array.isArray(value)) return value.map(cloneValue);
-      if (value && typeof value === "object") return JSON.parse(JSON.stringify(value));
+      if(Array.isArray(value)) return value.map(cloneValue);
+      if(value && typeof value === "object") return JSON.parse(JSON.stringify(value));
       return value;
     }
 
@@ -77,28 +77,63 @@
       return `${cleanPrefix}-${Math.random().toString(36).slice(2,8)}-${Date.now().toString(36)}`;
     }
 
-    const DEFAULT_ADMIN_USER = { id:"admin", username:"Admin", passwordHash:hashPassword("admin"), role:"admin" };
+    const DEFAULT_ADMIN_USER = { id:"admin", username:"Admin", passwordHash:hashPassword("admin"), role:"admin", createdAt:new Date(2023,0,1).toISOString() };
 
     function normalizeUsers(raw){
-      const list = Array.isArray(raw) ? raw : [];
-      const normalized = list
-        .map(item => {
-          if(!item || typeof item !== "object") return null;
-          const id = typeof item.id === "string" ? item.id : generateId("user");
-          const username = typeof item.username === "string" && item.username.trim() ? item.username.trim() : "Nutzer";
-          const passwordHash = typeof item.passwordHash === "string" ? item.passwordHash : hashPassword("passwort");
-          if(id === DEFAULT_ADMIN_USER.id){
-            return { ...DEFAULT_ADMIN_USER, username, passwordHash, role:"admin" };
-          }
-          return { id, username, passwordHash, role:"user" };
-        })
-        .filter(Boolean);
-
-      if(!normalized.some(u => u.id === DEFAULT_ADMIN_USER.id)){
-        normalized.unshift({ ...DEFAULT_ADMIN_USER });
+      const arr = Array.isArray(raw) ? raw : [];
+      const map = new Map();
+      for(const item of arr){
+        if(!item || typeof item !== "object") continue;
+        const id = typeof item.id === "string" ? item.id : generateId("user");
+        const username = typeof item.username === "string" && item.username.trim() ? item.username.trim() : "Nutzer";
+        const passwordHash = typeof item.passwordHash === "string" ? item.passwordHash : hashPassword("passwort");
+        const createdAt = typeof item.createdAt === "string" ? item.createdAt : new Date().toISOString();
+        if(id === DEFAULT_ADMIN_USER.id){
+          map.set(DEFAULT_ADMIN_USER.id, { ...DEFAULT_ADMIN_USER, username, passwordHash, createdAt });
+        } else {
+          map.set(id, { id, username, passwordHash, role:"user", createdAt });
+        }
       }
+      if(!map.has(DEFAULT_ADMIN_USER.id)){
+        map.set(DEFAULT_ADMIN_USER.id, { ...DEFAULT_ADMIN_USER });
+      }
+      return Array.from(map.values());
+    }
 
-      return normalized;
+    function readLocalStorage(key, initialValue){
+      try{
+        const stored = localStorage.getItem(key);
+        if(stored !== null){
+          return JSON.parse(stored);
+        }
+      }catch{}
+      const fallback = typeof initialValue === "function" ? initialValue() : initialValue;
+      return cloneValue(fallback);
+    }
+
+    function useLocalStorage(key, initialValue){
+      const initializer = () => readLocalStorage(key, initialValue);
+      const [state, setState] = useState(initializer);
+      useEffect(()=>{
+        setState(readLocalStorage(key, initialValue));
+      },[key]);
+      useEffect(()=>{
+        try{
+          localStorage.setItem(key, JSON.stringify(state));
+        }catch{}
+      },[key,state]);
+      return [state, setState];
+    }
+
+    const SessionContext = React.createContext(null);
+    function useSession(){
+      return useContext(SessionContext);
+    }
+
+    function useScopedStorage(baseKey, initialValue){
+      const session = useSession();
+      const userId = session?.activeUser?.id || "anon";
+      return useLocalStorage(`user:${userId}:${baseKey}`, initialValue);
     }
 
     const COLOR = {
@@ -132,110 +167,14 @@
       { id:"bdg-39-ma-1", question:"§ 39 BDG (Dienstzuteilung): Unter welchen Bedingungen ist eine Zuteilung ohne schriftliche Zustimmung über 90 Tage zulässig? Wählen Sie alle zutreffenden.", choices:["Wenn der Dienstbetrieb auf andere Weise nicht aufrechterhalten werden kann.","Wenn sie zum Zwecke einer Ausbildung erfolgt.","Wenn wichtige private Gründe vorliegen.","Wenn der Kommandant der entsendenden Dienststelle zustimmt.","Wenn der Kommandant der Zuteilungsdienststelle zustimmt."], correct:[0,1], explain:">90 Tage ohne Zustimmung: nur zur Aufrechterhaltung des Dienstbetriebs oder zu Ausbildungszwecken.", law_ref:"BDG § 39", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
     ];
 
+    const MIN_TIER = 1, MAX_TIER = 5;
     const DEFAULT_FILTER = { tags: [], difficulty: 0 };
     const DEFAULT_METRICS = { totalAttempts: 0, totalCorrect: 0, attemptedIds: {}, correctIds: {} };
-
-    // ========= Helpers =========
-    function useLocalStorage(key, initial){
-      const [state,setState]=useState(()=>{
-        try{
-          const stored = localStorage.getItem(key);
-          if(stored !== null) return JSON.parse(stored);
-        }catch{}
-        return cloneValue(initial);
-      });
-      useEffect(()=>{
-        try{ localStorage.setItem(key, JSON.stringify(state)); }catch{}
-      },[key,state]);
-      return [state,setState];
-    }
-
-    function useUsers(){
-      const [users, setUsersState] = useState(() => {
-        try{
-          const saved = JSON.parse(localStorage.getItem("users") || "null");
-          if(Array.isArray(saved) && saved.length){
-            return normalizeUsers(saved);
-          }
-        }catch{}
-        return normalizeUsers([DEFAULT_ADMIN_USER]);
-      });
-
-      useEffect(()=>{
-        try{ localStorage.setItem("users", JSON.stringify(users)); }catch{}
-      },[users]);
-
-      const setUsers = useCallback((updater) => {
-        setUsersState(prev => {
-          const next = typeof updater === "function" ? updater(prev) : updater;
-          return normalizeUsers(next);
-        });
-      }, []);
-
-      return [users, setUsers];
-    }
-
-    function useUserLocalStorage(userId, key, initial){
-      const storageKey = userId ? `${userId}:${key}` : null;
-      const [state, setState] = useState(() => cloneValue(initial));
-
-      useEffect(() => {
-        if(!storageKey){
-          setState(cloneValue(initial));
-          return;
-        }
-        try{
-          const raw = localStorage.getItem(storageKey);
-          if(raw !== null){
-            setState(JSON.parse(raw));
-          } else {
-            setState(cloneValue(initial));
-          }
-        }catch{
-          setState(cloneValue(initial));
-        }
-      }, [storageKey]);
-
-      useEffect(() => {
-        if(!storageKey) return;
-        try{ localStorage.setItem(storageKey, JSON.stringify(state)); }catch{}
-      }, [storageKey, state]);
-
-      return [state, setState];
-    }
+    const tierWeight = (tier) => ({ 1:5, 2:3, 3:2, 4:1.2, 5:1 }[tier] || 1);
 
     function rankFor(score){
-      const r=[...RANKS].reverse().find(r=>score>=r.min);
-      return r? r.title : RANKS[0].title;
-    }
-
-    function tierWeight(tier){
-      return ({1:5,2:3,3:2,4:1.2,5:1}[tier] || 1);
-    }
-
-    function weightedOrder(items, tierResolver){
-      const resolve = typeof tierResolver === "function" ? tierResolver : (()=>2);
-      return [...items]
-        .map(x => ({ x, k: Math.random() ** (1 / tierWeight(resolve(x.id))) }))
-        .sort((a,b) => b.k - a.k)
-        .map(o => o.x);
-    }
-
-    const getDisplayOrder = (qid, idx) => seededShuffle([0,1,2,3,4], `${qid}#${idx}`);
-
-    function useQuestions(){
-      const [questions, setQuestions] = useState(() => {
-        try {
-          const saved = JSON.parse(localStorage.getItem('questions') || 'null');
-          return (saved && Array.isArray(saved)) ? saved : DEFAULT_QUESTIONS;
-        } catch {
-          return DEFAULT_QUESTIONS;
-        }
-      });
-      useEffect(() => {
-        try { localStorage.setItem('questions', JSON.stringify(questions)); } catch {}
-      }, [questions]);
-      return { questions, setQuestions };
+      const r = [...RANKS].reverse().find(r=>score>=r.min);
+      return r ? r.title : RANKS[0].title;
     }
 
     function Chip({ children, className="" }){
@@ -277,7 +216,7 @@
                     </div>
                   </div>
                 </div>
-              );
+              )
             })}
           </div>
           <div className="grid md:grid-cols-3 gap-4">
@@ -289,14 +228,14 @@
       );
     }
 
-    function QuestionCard({ q, idx, submitted, onSubmit, onNext, getTier }){
+    function QuestionCard({ q, idx, submitted, onSubmit, onNext, getTierValue }){
       const [selectedDisplay, setSelectedDisplay] = useState([]);
-      const displayOrder = useMemo(()=> getDisplayOrder(q.id, idx), [q.id, idx]);
+      const displayOrder = useMemo(()=> seededShuffle([0,1,2,3,4], `${q.id}#${idx}`), [q.id, idx]);
       useEffect(()=>{ setSelectedDisplay([]); }, [q.id, idx]);
       const toggle = (dispIdx) => setSelectedDisplay(prev => prev.includes(dispIdx)? prev.filter(x=>x!==dispIdx):[...prev, dispIdx]);
       const correctSet = new Set(q.correct);
       const group = GROUPS.find(g=>q.tags.some(t=>g.tags.includes(t))) || GROUPS[GROUPS.length-1];
-      const tierValue = getTier(q.id);
+      const tierValue = getTierValue(q.id);
       return (
         <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-0 overflow-hidden">
           <div className={`h-2 w-full bg-gradient-to-r ${group.color.grad}`} />
@@ -355,438 +294,444 @@
       );
     }
 
-    function UserAuthPanel({ users, setUsers, onLogin, theme, setTheme }){
-      const [mode, setMode] = useState("login");
-      const [username, setUsername] = useState("");
-      const [password, setPassword] = useState("");
-      const [error, setError] = useState("");
-      const [info, setInfo] = useState("Standard-Admin: Benutzername \"Admin\", Passwort \"admin\".");
-
-      const handleLogin = (e) => {
-        e.preventDefault();
-        setError("");
-        const trimmed = username.trim();
-        if(!trimmed){ setError("Bitte Nutzername eingeben."); return; }
-        const user = users.find(u => u.username.toLowerCase() === trimmed.toLowerCase());
-        if(!user){ setError("Nutzer nicht gefunden."); return; }
-        if(!passwordsMatch(user.passwordHash, password)){
-          setError("Passwort stimmt nicht.");
-          return;
+    function useQuestions(){
+      const [questions, setQuestions] = useLocalStorage('questions', () => DEFAULT_QUESTIONS);
+      useEffect(()=>{
+        if(!Array.isArray(questions) || !questions.length){
+          setQuestions(() => cloneValue(DEFAULT_QUESTIONS));
         }
-        onLogin(user.id);
-        setUsername("");
-        setPassword("");
-      };
+      },[questions, setQuestions]);
+      return { questions: Array.isArray(questions)? questions : DEFAULT_QUESTIONS, setQuestions };
+    }
 
-      const handleRegister = (e) => {
+    function AuthScreen({ onLogin, onRegister, message, error }){
+      const [mode, setMode] = useState('login');
+      const [username, setUsername] = useState('');
+      const [password, setPassword] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [localError, setLocalError] = useState('');
+
+      useEffect(()=>{ setLocalError(''); }, [mode, username, password, confirm]);
+
+      const submit = (e) => {
         e.preventDefault();
-        setError("");
         const trimmed = username.trim();
-        if(!trimmed){ setError("Bitte Nutzername angeben."); return; }
-        if(password.length < 4){ setError("Passwort muss mindestens 4 Zeichen haben."); return; }
-        if(users.some(u => u.username.toLowerCase() === trimmed.toLowerCase())){
-          setError("Nutzername bereits vergeben.");
-          return;
+        if(!trimmed){ setLocalError('Bitte Benutzername eingeben.'); return; }
+        if(!password){ setLocalError('Bitte Passwort eingeben.'); return; }
+        if(mode==='register'){
+          if(password.length < 4){ setLocalError('Passwort muss mindestens 4 Zeichen enthalten.'); return; }
+          if(password !== confirm){ setLocalError('Passwörter stimmen nicht überein.'); return; }
+          onRegister(trimmed, password);
+        } else {
+          onLogin(trimmed, password);
         }
-        const newUser = { id: generateId("user"), username: trimmed, passwordHash: hashPassword(password), role:"user" };
-        setUsers(prev => [...prev, newUser]);
-        setInfo("Neues Profil angelegt.");
-        onLogin(newUser.id);
-        setUsername("");
-        setPassword("");
       };
-
-      const submit = mode === "login" ? handleLogin : handleRegister;
 
       return (
-        <div className="min-h-screen flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-white dark:bg-gray-800 rounded-2xl shadow p-6">
-            <div className="flex justify-between items-center mb-4">
-              <h1 className="text-xl font-semibold">Lerntool E1 / E2a</h1>
-              <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">
-                {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
-              </button>
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-600 to-indigo-700 p-6">
+          <div className="max-w-md w-full bg-white/95 backdrop-blur rounded-3xl shadow-xl p-8">
+            <h1 className="text-2xl font-bold text-center text-gray-800 mb-6">Lerntool E1 / E2a</h1>
+            <div className="text-sm text-gray-600 mb-4">
+              <p>Standard-Admin: <strong>Benutzername</strong> <code>Admin</code>, <strong>Passwort</strong> <code>admin</code>.</p>
             </div>
-            <div className="flex gap-2 mb-4">
-              <button onClick={()=>setMode("login") } className={`flex-1 px-3 py-2 rounded-lg border ${mode==='login'? 'bg-blue-600 text-white border-blue-600':'dark:border-gray-600'}`}>Login</button>
-              <button onClick={()=>setMode("register")} className={`flex-1 px-3 py-2 rounded-lg border ${mode==='register'? 'bg-blue-600 text-white border-blue-600':'dark:border-gray-600'}`}>Registrieren</button>
+            <div className="flex gap-2 mb-6">
+              <button onClick={()=>setMode('login')} className={`flex-1 py-2 rounded-full border ${mode==='login'? 'bg-blue-600 text-white border-blue-600':'border-gray-300 text-gray-600'}`}>Anmelden</button>
+              <button onClick={()=>setMode('register')} className={`flex-1 py-2 rounded-full border ${mode==='register'? 'bg-indigo-600 text-white border-indigo-600':'border-gray-300 text-gray-600'}`}>Registrieren</button>
             </div>
             <form onSubmit={submit} className="space-y-4">
               <div>
-                <label className="text-sm font-medium block mb-1">Nutzername</label>
-                <input value={username} onChange={e=>setUsername(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="z.B. Max" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Benutzername</label>
+                <input value={username} onChange={e=>setUsername(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring focus:border-blue-500" placeholder="z.B. Max" />
               </div>
               <div>
-                <label className="text-sm font-medium block mb-1">Passwort</label>
-                <input type="password" value={password} onChange={e=>setPassword(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="mind. 4 Zeichen" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Passwort</label>
+                <input value={password} onChange={e=>setPassword(e.target.value)} type="password" className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring focus:border-blue-500" placeholder="••••" />
               </div>
-              {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
-              {info && !error && <div className="text-xs text-gray-500 dark:text-gray-400">{info}</div>}
-              <button type="submit" className="w-full px-3 py-2 rounded-lg bg-blue-600 text-white">{mode==='login' ? 'Anmelden' : 'Profil anlegen'}</button>
+              {mode==='register' && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Passwort bestätigen</label>
+                  <input value={confirm} onChange={e=>setConfirm(e.target.value)} type="password" className="w-full px-3 py-2 rounded-lg border border-gray-300 focus:outline-none focus:ring focus:border-blue-500" placeholder="••••" />
+                </div>
+              )}
+              {(localError || error) && <div className="text-sm text-red-600">{localError || error}</div>}
+              {message && !localError && !error && <div className="text-sm text-green-600">{message}</div>}
+              <button type="submit" className="w-full py-2 rounded-lg bg-blue-600 text-white font-semibold">{mode==='login'? 'Anmelden':'Konto anlegen'}</button>
             </form>
           </div>
         </div>
       );
     }
 
-    function UserSwitcher({ users, activeUser, onLogout, onSwitch, onChangePassword }){
-      const others = users.filter(u => u.id !== activeUser.id);
+    function PasswordChangeForm({ onSubmit }){
+      const [current, setCurrent] = useState('');
+      const [next, setNext] = useState('');
+      const [confirm, setConfirm] = useState('');
+      const [status, setStatus] = useState(null);
+      const [error, setError] = useState(null);
+
+      const handleSubmit = (e) => {
+        e.preventDefault();
+        setError(null); setStatus(null);
+        if(!current || !next){ setError('Bitte alle Felder ausfüllen.'); return; }
+        if(next.length < 4){ setError('Neues Passwort muss mindestens 4 Zeichen haben.'); return; }
+        if(next !== confirm){ setError('Passwörter stimmen nicht überein.'); return; }
+        const result = onSubmit(current, next);
+        if(result.ok){
+          setStatus('Passwort erfolgreich aktualisiert.');
+          setCurrent(''); setNext(''); setConfirm('');
+        } else {
+          setError(result.error || 'Änderung fehlgeschlagen.');
+        }
+      };
+
       return (
-        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <form onSubmit={handleSubmit} className="space-y-3">
           <div>
-            <div className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wide">Angemeldet als</div>
-            <div className="text-lg font-semibold">
-              {activeUser.username}
-              {activeUser.role === 'admin' ? <span className="ml-2 text-sm px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-200">Admin</span> : null}
-            </div>
+            <label className="block text-xs font-medium mb-1">Aktuelles Passwort</label>
+            <input type="password" value={current} onChange={e=>setCurrent(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {others.map(u => (
-              <button key={u.id} onClick={()=>onSwitch(u.id)} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">
-                Wechsel zu {u.username}{u.role==='admin' ? ' ⭐' : ''}
-              </button>
-            ))}
-            <button onClick={onChangePassword} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">Passwort ändern</button>
-            <button onClick={onLogout} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">Abmelden</button>
+          <div>
+            <label className="block text-xs font-medium mb-1">Neues Passwort</label>
+            <input type="password" value={next} onChange={e=>setNext(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
           </div>
-        </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Neues Passwort bestätigen</label>
+            <input type="password" value={confirm} onChange={e=>setConfirm(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
+          </div>
+          {error && <div className="text-xs text-red-500">{error}</div>}
+          {status && <div className="text-xs text-green-500">{status}</div>}
+          <button type="submit" className="px-3 py-2 rounded-lg border dark:border-gray-600">Passwort ändern</button>
+        </form>
       );
     }
 
-    function QuestionForm({ draft, onChange, onSubmit, onCancel, submitLabel, disableId }){
-      if(!draft) return null;
-      const updateField = (field, value) => onChange({ ...draft, [field]: value });
-      const updateChoice = (index, value) => {
-        const choices = draft.choices.map((c,i)=> i===index ? value : c);
-        onChange({ ...draft, choices });
+    function QuestionForm({ value, onChange, onSubmit, submitLabel }){
+      const updateField = (field, val) => {
+        onChange(prev => ({ ...prev, [field]: val }));
       };
-      const toggleCorrect = (index) => {
-        const has = draft.correct.includes(index);
-        const correct = has ? draft.correct.filter(i=>i!==index) : [...draft.correct, index];
-        onChange({ ...draft, correct });
+
+      const updateChoice = (index, val) => {
+        onChange(prev => {
+          const choices = [...prev.choices];
+          choices[index] = val;
+          return { ...prev, choices };
+        });
       };
+
       return (
-        <form onSubmit={(e)=>{e.preventDefault(); onSubmit();}} className="space-y-4">
+        <form onSubmit={onSubmit} className="space-y-3">
           <div>
-            <label className="block text-sm font-medium mb-1">Frage-ID</label>
-            <input value={draft.id} onChange={e=>updateField('id', e.target.value)} disabled={disableId} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="z.B. bdg-101" />
-            <p className="text-xs text-gray-500 mt-1">{disableId ? 'Bestehende IDs können hier nicht geändert werden.' : 'Leer lassen, um automatisch eine ID zu erzeugen.'}</p>
+            <label className="block text-xs font-medium mb-1">Fragetext</label>
+            <textarea value={value.question} onChange={e=>updateField('question', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" rows="3" />
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Fragetext</label>
-            <textarea value={draft.question} onChange={e=>updateField('question', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" rows={4} placeholder="Frage eingeben" />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {value.choices.map((choice, idx) => (
+              <div key={idx}>
+                <label className="block text-xs font-medium mb-1">Antwort {String.fromCharCode(65+idx)}</label>
+                <textarea value={choice} onChange={e=>updateChoice(idx, e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" rows="2" />
+              </div>
+            ))}
           </div>
-          <div>
-            <label className="block text-sm font-medium mb-2">Antwortoptionen (markieren Sie die richtigen Antworten)</label>
-            <div className="space-y-2">
-              {draft.choices.map((choice,index)=>(
-                <div key={index} className="flex items-center gap-2">
-                  <input type="checkbox" checked={draft.correct.includes(index)} onChange={()=>toggleCorrect(index)} />
-                  <input value={choice} onChange={e=>updateChoice(index, e.target.value)} className="flex-1 px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder={`Antwort ${index+1}`} />
-                </div>
-              ))}
+          <div className="grid md:grid-cols-3 gap-3">
+            <div>
+              <label className="block text-xs font-medium mb-1">Korrekte Indizes (z.B. 0,2,4)</label>
+              <input value={value.correctText} onChange={e=>updateField('correctText', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1">Tags (Komma-getrennt)</label>
+              <input value={value.tagsText} onChange={e=>updateField('tagsText', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium mb-1">Schwierigkeit (1-5)</label>
+              <input value={value.difficulty} onChange={e=>updateField('difficulty', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
             </div>
           </div>
-          <div className="grid md:grid-cols-2 gap-4">
+          <div className="grid md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium mb-1">Tags</label>
-              <input value={draft.tags.join(', ')} onChange={e=>updateField('tags', e.target.value.split(',').map(t=>t.trim()).filter(Boolean))} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="BDG, SPG" />
+              <label className="block text-xs font-medium mb-1">Rechtsgrundlage</label>
+              <input value={value.law_ref} onChange={e=>updateField('law_ref', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-1">Rechtsgrundlage</label>
-              <input value={draft.law_ref} onChange={e=>updateField('law_ref', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="z.B. BDG § 43" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Schwierigkeit</label>
-              <select value={draft.difficulty} onChange={e=>updateField('difficulty', Number(e.target.value))} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900">
-                {[1,2,3,4,5].map(n => <option key={n} value={n}>Level {n}</option>)}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Stand</label>
-              <input type="date" value={draft.last_checked || ""} onChange={e=>updateField('last_checked', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" />
+              <label className="block text-xs font-medium mb-1">Zuletzt geprüft (YYYY-MM-DD)</label>
+              <input value={value.last_checked} onChange={e=>updateField('last_checked', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" />
             </div>
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Erläuterung</label>
-            <textarea value={draft.explain} onChange={e=>updateField('explain', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" rows={3} placeholder="Hinweise und Begründung" />
+            <label className="block text-xs font-medium mb-1">Erklärung</label>
+            <textarea value={value.explain} onChange={e=>updateField('explain', e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 bg-white dark:bg-gray-900" rows="3" />
           </div>
-          <div className="flex justify-end gap-2">
-            <button type="button" onClick={onCancel} className="px-3 py-2 rounded-lg border dark:border-gray-600">Abbrechen</button>
-            <button type="submit" className="px-3 py-2 rounded-lg bg-blue-600 text-white">{submitLabel}</button>
-          </div>
+          <button type="submit" className="px-4 py-2 rounded-lg border dark:border-gray-600">{submitLabel}</button>
         </form>
       );
     }
 
     function AdminPanel({ questions, setQuestions }){
-      const [mode, setMode] = useState("list");
-      const [draft, setDraft] = useState(null);
-      const [message, setMessage] = useState("");
-      const [error, setError] = useState("");
-
-      useEffect(() => {
-        if(message){
-          const t = setTimeout(() => setMessage(""), 4000);
-          return () => clearTimeout(t);
-        }
-      }, [message]);
+      const [editingId, setEditingId] = useState(null);
+      const [editForm, setEditForm] = useState(null);
+      const [newForm, setNewForm] = useState({
+        question: "",
+        choices: Array(5).fill(""),
+        correctText: "",
+        explain: "",
+        law_ref: "",
+        tagsText: "",
+        last_checked: new Date().toISOString().slice(0,10),
+        difficulty: "1",
+      });
+      const [feedback, setFeedback] = useState(null);
 
       const startEdit = (q) => {
-        setDraft({ ...q, choices:[...q.choices], correct:[...q.correct], tags:[...q.tags] });
-        setMode("edit");
-        setError("");
+        setEditingId(q.id);
+        setEditForm({
+          id: q.id,
+          question: q.question,
+          choices: [...q.choices],
+          correctText: (Array.isArray(q.correct)? q.correct : []).join(','),
+          explain: q.explain || "",
+          law_ref: q.law_ref || "",
+          tagsText: (Array.isArray(q.tags)? q.tags : []).join(', '),
+          last_checked: q.last_checked || new Date().toISOString().slice(0,10),
+          difficulty: String(q.difficulty ?? 1),
+        });
+        setFeedback(null);
       };
 
-      const startCreate = () => {
-        setDraft({ id:"", question:"", choices:["","","","",""], correct:[], explain:"", law_ref:"", tags:[], last_checked:new Date().toISOString().slice(0,10), difficulty:1 });
-        setMode("create");
-        setError("");
+      const parseCorrect = (str) => {
+        return str.split(',').map(s=>s.trim()).filter(Boolean).map(Number).filter(n=>Number.isInteger(n) && n>=0 && n<5);
       };
 
-      const cancel = () => {
-        setMode("list");
-        setDraft(null);
+      const parseTags = (str) => {
+        return str.split(',').map(s=>s.trim()).filter(Boolean);
       };
 
-      const validate = (data) => {
-        if(!data.question || !data.question.trim()) return "Fragetext darf nicht leer sein.";
-        if(!data.choices.every(c => c && c.trim())) return "Alle Antwortoptionen müssen ausgefüllt sein.";
-        if(!data.correct.length) return "Mindestens eine Antwort muss als richtig markiert sein.";
-        return "";
+      const validateQuestion = (payload) => {
+        if(!payload.question.trim()) return 'Fragetext darf nicht leer sein.';
+        if(!payload.choices.every(c=>c && c.trim())) return 'Alle Antwortmöglichkeiten müssen ausgefüllt sein.';
+        if(!payload.correct.length) return 'Mindestens ein korrekter Index erforderlich.';
+        if(payload.correct.some(idx => idx<0 || idx>=payload.choices.length)) return 'Korrekte Indizes außerhalb des gültigen Bereichs.';
+        if(!payload.tags.length) return 'Mindestens ein Tag erforderlich.';
+        const diff = Number(payload.difficulty);
+        if(!Number.isFinite(diff) || diff<1 || diff>5) return 'Schwierigkeit muss zwischen 1 und 5 liegen.';
+        if(!/\d{4}-\d{2}-\d{2}/.test(payload.last_checked)) return 'Datum muss im Format YYYY-MM-DD vorliegen.';
+        return null;
       };
 
-      const handleSubmit = () => {
-        if(!draft) return;
-        const normalized = {
-          ...draft,
-          id: draft.id.trim(),
-          question: draft.question.trim(),
-          choices: draft.choices.map(c => c.trim()),
-          correct: [...draft.correct].sort((a,b)=>a-b),
-          tags: draft.tags.map(t=>t.trim()).filter(Boolean),
-          law_ref: (draft.law_ref || "").trim(),
-          explain: (draft.explain || "").trim(),
-          last_checked: draft.last_checked || new Date().toISOString().slice(0,10),
-          difficulty: Number(draft.difficulty) || 1,
+      const submitEdit = (e) => {
+        e.preventDefault();
+        if(!editForm) return;
+        const tags = parseTags(editForm.tagsText);
+        const payload = {
+          id: editForm.id,
+          question: editForm.question.trim(),
+          choices: editForm.choices.map(c=>c.trim()),
+          correct: parseCorrect(editForm.correctText),
+          explain: editForm.explain.trim(),
+          law_ref: editForm.law_ref.trim(),
+          tags,
+          last_checked: editForm.last_checked.trim(),
+          difficulty: Number(editForm.difficulty),
         };
-        const validationError = validate(normalized);
-        if(validationError){ setError(validationError); return; }
-        if(mode === "edit"){
-          setQuestions(prev => prev.map(q => q.id === normalized.id ? normalized : q));
-          setMessage(`Frage ${normalized.id} aktualisiert.`);
-        } else {
-          let newId = normalized.id;
-          if(!newId){
-            const base = normalized.tags[0] ? normalized.tags[0].toLowerCase() : 'frage';
-            newId = generateId(base);
-          }
-          if(questions.some(q => q.id === newId)){
-            setError("Diese ID ist bereits vergeben.");
-            return;
-          }
-          setQuestions(prev => [...prev, { ...normalized, id: newId }]);
-          setMessage(`Neue Frage ${newId} hinzugefügt.`);
-        }
-        setMode("list");
-        setDraft(null);
-        setError("");
+        const errorMsg = validateQuestion(payload);
+        if(errorMsg){ setFeedback({ type:'error', text:errorMsg }); return; }
+        setQuestions(prev => {
+          const list = Array.isArray(prev)? [...prev] : [];
+          const idx = list.findIndex(q=>q.id===payload.id);
+          if(idx>=0){ list[idx] = { ...list[idx], ...payload }; }
+          return list;
+        });
+        setFeedback({ type:'success', text:'Frage aktualisiert.' });
+        setEditingId(null);
+        setEditForm(null);
       };
 
-      const sortedQuestions = [...questions].sort((a,b) => a.id.localeCompare(b.id));
+      const submitNew = (e) => {
+        e.preventDefault();
+        const tags = parseTags(newForm.tagsText);
+        const payload = {
+          id: generateId((tags[0] || 'frage').slice(0,8) || 'frage'),
+          question: newForm.question.trim(),
+          choices: newForm.choices.map(c=>c.trim()),
+          correct: parseCorrect(newForm.correctText),
+          explain: newForm.explain.trim(),
+          law_ref: newForm.law_ref.trim(),
+          tags,
+          last_checked: newForm.last_checked.trim(),
+          difficulty: Number(newForm.difficulty),
+        };
+        const errorMsg = validateQuestion(payload);
+        if(errorMsg){ setFeedback({ type:'error', text:errorMsg }); return; }
+        setQuestions(prev => {
+          const list = Array.isArray(prev)? [...prev] : [];
+          list.push(payload);
+          return list;
+        });
+        setNewForm({
+          question: "",
+          choices: Array(5).fill(""),
+          correctText: "",
+          explain: "",
+          law_ref: "",
+          tagsText: "",
+          last_checked: new Date().toISOString().slice(0,10),
+          difficulty: "1",
+        });
+        setFeedback({ type:'success', text:'Neue Frage hinzugefügt.' });
+      };
 
       return (
-        <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold">Adminbereich: Fragen verwalten</h2>
-            {mode === 'list' && (
-              <button onClick={startCreate} className="px-3 py-2 rounded-lg bg-green-600 text-white">Neue Frage</button>
-            )}
-          </div>
-          {message && <div className="text-sm text-green-600 dark:text-green-300">{message}</div>}
-          {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
-          {mode === "list" ? (
-            <div className="space-y-2 max-h-96 overflow-y-auto pr-2">
-              {sortedQuestions.map(q => (
-                <div key={q.id} className="p-3 border rounded-xl dark:border-gray-700 flex items-start justify-between gap-4">
-                  <div>
-                    <div className="text-sm font-semibold">{q.id}</div>
-                    <div className="text-sm text-gray-600 dark:text-gray-300">{q.question}</div>
-                    <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Tags: {q.tags.join(', ')} · Stand: {q.last_checked}</div>
-                  </div>
-                  <button onClick={()=>startEdit(q)} className="px-3 py-2 rounded-lg border dark:border-gray-600">Bearbeiten</button>
-                </div>
-              ))}
-              {!sortedQuestions.length && <div className="text-sm text-gray-500">Keine Fragen vorhanden.</div>}
-            </div>
-          ) : (
-            <QuestionForm draft={draft} onChange={setDraft} onSubmit={handleSubmit} onCancel={cancel} submitLabel={mode==='edit' ? 'Speichern' : 'Erstellen'} disableId={mode==='edit'} />
+        <div className="mt-10 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">
+          <h3 className="text-lg font-semibold mb-4">Admin · Fragenverwaltung</h3>
+          {feedback && (
+            <div className={`mb-4 text-sm ${feedback.type==='error' ? 'text-red-500' : 'text-green-500'}`}>{feedback.text}</div>
           )}
+          <div className="space-y-6">
+            <div>
+              <h4 className="font-semibold mb-2">Fragen bearbeiten</h4>
+              <div className="max-h-64 overflow-y-auto border border-dashed border-gray-300 dark:border-gray-700 rounded-xl">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-100 dark:bg-gray-900">
+                    <tr className="text-left">
+                      <th className="px-3 py-2">ID</th>
+                      <th className="px-3 py-2">Frage</th>
+                      <th className="px-3 py-2">Aktion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {questions.map(q => (
+                      <tr key={q.id} className="border-t border-gray-200 dark:border-gray-700">
+                        <td className="px-3 py-2 whitespace-nowrap text-xs">{q.id}</td>
+                        <td className="px-3 py-2">{q.question.slice(0,80)}{q.question.length>80?'…':''}</td>
+                        <td className="px-3 py-2 text-right">
+                          <button onClick={()=>startEdit(q)} className="px-3 py-1 rounded-full border text-xs">Bearbeiten</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {editForm && (
+                <div className="mt-4 p-4 border rounded-2xl dark:border-gray-700">
+                  <div className="flex justify-between items-center mb-3">
+                    <h5 className="font-semibold">Frage {editingId} bearbeiten</h5>
+                    <button onClick={()=>{setEditingId(null); setEditForm(null);}} className="text-xs text-gray-500">Schließen</button>
+                  </div>
+                  <QuestionForm value={editForm} onChange={setEditForm} onSubmit={submitEdit} submitLabel="Änderungen speichern" />
+                </div>
+              )}
+            </div>
+            <div className="p-4 border rounded-2xl dark:border-gray-700">
+              <h4 className="font-semibold mb-3">Neue Frage hinzufügen</h4>
+              <QuestionForm value={newForm} onChange={setNewForm} onSubmit={submitNew} submitLabel="Frage hinzufügen" />
+            </div>
+          </div>
         </div>
       );
     }
 
-    function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions }){
-      const userId = activeUser.id;
-      const [view, setView] = useUserLocalStorage(userId, "view", "dashboard");
-      const [mode, setMode] = useUserLocalStorage(userId, "mode", "training");
-      const [filter, setFilter] = useUserLocalStorage(userId, "filter", DEFAULT_FILTER);
-      const [review, setReview] = useUserLocalStorage(userId, "review", []);
-      const [metrics, setMetrics] = useUserLocalStorage(userId, "metrics", DEFAULT_METRICS);
-      const [score, setScore] = useUserLocalStorage(userId, "score", 0);
-      const [streak, setStreak] = useUserLocalStorage(userId, "streak", 0);
-      const [idx, setIdx] = useUserLocalStorage(userId, "idx", 0);
-      const [tierMap, setTierMap] = useUserLocalStorage(userId, "tiers", {});
-      const [seed, setSeed] = useState(0);
+    function MainApp({ onLogout, onChangePassword }){
+      const session = useSession();
+      const activeUser = session?.activeUser;
+      const { questions: QUESTIONS, setQuestions } = useQuestions();
+      const [view, setView] = useScopedStorage('view','dashboard');
+      const [mode, setMode] = useScopedStorage('mode','training');
+      const [filter, setFilter] = useScopedStorage('filter', DEFAULT_FILTER);
+      const [review, setReview] = useScopedStorage('review', []);
+      const [metrics, setMetrics] = useScopedStorage('metrics', DEFAULT_METRICS);
+      const [score, setScore] = useScopedStorage('score', 0);
+      const [streak, setStreak] = useScopedStorage('streak', 0);
+      const [idx, setIdx] = useScopedStorage('idx', 0);
       const [showExplain, setShowExplain] = useState(false);
-      const [passwordFormOpen, setPasswordFormOpen] = useState(false);
-      const [passwordCurrent, setPasswordCurrent] = useState("");
-      const [passwordNew, setPasswordNew] = useState("");
-      const [passwordConfirm, setPasswordConfirm] = useState("");
-      const [passwordStatus, setPasswordStatus] = useState(null);
-
-      const resetPasswordForm = useCallback(() => {
-        setPasswordFormOpen(false);
-        setPasswordCurrent("");
-        setPasswordNew("");
-        setPasswordConfirm("");
-        setPasswordStatus(null);
-      }, []);
-
-      const openPasswordForm = useCallback(() => {
-        setPasswordFormOpen(true);
-        setPasswordCurrent("");
-        setPasswordNew("");
-        setPasswordConfirm("");
-        setPasswordStatus(null);
-      }, []);
-
-      useEffect(()=>{ setShowExplain(false); }, [idx, userId]);
+      const [theme, setTheme] = useScopedStorage('theme','light');
+      const [tierMap, setTierMap] = useScopedStorage('tiers', {});
 
       useEffect(()=>{
-        if(view === 'admin' && activeUser.role !== 'admin'){
-          setView('dashboard');
-        }
-      }, [view, activeUser.role, setView]);
+        if(theme === 'dark'){ document.documentElement.classList.add('dark'); }
+        else { document.documentElement.classList.remove('dark'); }
+      },[theme]);
 
-      useEffect(() => {
-        resetPasswordForm();
-      }, [userId, resetPasswordForm]);
+      const filterSafe = useMemo(()=>{
+        const base = (filter && typeof filter === 'object') ? filter : DEFAULT_FILTER;
+        const tags = Array.isArray(base.tags) ? base.tags.filter(Boolean) : [];
+        const difficulty = Number(base.difficulty) || 0;
+        return { tags, difficulty };
+      },[filter]);
 
-      const attemptPasswordChange = useCallback((currentPlain, nextPlain) => {
-        const referenceHash = (users.find(u => u.id === userId)?.passwordHash) || activeUser.passwordHash || "";
-        if(!passwordsMatch(referenceHash, currentPlain)){
-          return { ok:false, error:"Aktuelles Passwort ist falsch." };
-        }
-        const nextHash = hashPassword(nextPlain);
-        setUsers(prev => prev.map(u => u.id === userId ? { ...u, passwordHash: nextHash } : u));
-        return { ok:true };
-      }, [users, userId, activeUser.passwordHash, setUsers]);
+      const metricsSafe = useMemo(()=>{
+        const base = (metrics && typeof metrics === 'object') ? metrics : DEFAULT_METRICS;
+        return {
+          totalAttempts: Number(base.totalAttempts) || 0,
+          totalCorrect: Number(base.totalCorrect) || 0,
+          attemptedIds: (base.attemptedIds && typeof base.attemptedIds === 'object') ? base.attemptedIds : {},
+          correctIds: (base.correctIds && typeof base.correctIds === 'object') ? base.correctIds : {},
+        };
+      },[metrics]);
 
-      const submitPasswordChange = useCallback((e) => {
-        e.preventDefault();
-        setPasswordStatus(null);
-        if(passwordNew.length < 4){
-          setPasswordStatus({ type:"error", text:"Neues Passwort muss mindestens 4 Zeichen haben." });
-          return;
-        }
-        if(passwordNew !== passwordConfirm){
-          setPasswordStatus({ type:"error", text:"Neue Passwörter stimmen nicht überein." });
-          return;
-        }
-        const result = attemptPasswordChange(passwordCurrent, passwordNew);
-        if(!result.ok){
-          setPasswordStatus({ type:"error", text: result.error || "Aktualisierung fehlgeschlagen." });
-          return;
-        }
-        setPasswordStatus({ type:"success", text:"Passwort erfolgreich aktualisiert." });
-        setPasswordCurrent("");
-        setPasswordNew("");
-        setPasswordConfirm("");
-      }, [passwordNew, passwordConfirm, attemptPasswordChange, passwordCurrent]);
+      const tierSafe = useMemo(()=> (tierMap && typeof tierMap === 'object') ? tierMap : {}, [tierMap]);
 
-      const safeFilterRaw = (filter && typeof filter === 'object') ? filter : cloneValue(DEFAULT_FILTER);
-      const filterTags = Array.isArray(safeFilterRaw.tags) ? safeFilterRaw.tags : [];
-      const filterDifficulty = Number(safeFilterRaw.difficulty) || 0;
-      const safeFilter = { tags: filterTags, difficulty: filterDifficulty };
-      const safeMetrics = (metrics && typeof metrics === 'object') ? metrics : cloneValue(DEFAULT_METRICS);
-      const safeReview = Array.isArray(review) ? review : [];
+      const getTierValue = useCallback((id) => {
+        const raw = tierSafe[id];
+        const val = typeof raw === 'number' ? raw : 2;
+        return Math.max(MIN_TIER, Math.min(MAX_TIER, val));
+      },[tierSafe]);
 
-      const getTier = useCallback((id) => {
-        const map = (tierMap && typeof tierMap === 'object') ? tierMap : {};
-        const value = map[id];
-        const tier = typeof value === 'number' ? value : 2;
-        return Math.max(1, Math.min(5, tier));
-      }, [tierMap]);
-
-      const adjustTier = useCallback((id, delta) => {
+      const setTierValue = useCallback((id, updater) => {
         setTierMap(prev => {
           const base = (prev && typeof prev === 'object') ? { ...prev } : {};
           const current = typeof base[id] === 'number' ? base[id] : 2;
-          const next = Math.max(1, Math.min(5, current + delta));
-          base[id] = next;
+          const nextVal = typeof updater === 'function' ? updater(current) : updater;
+          base[id] = Math.max(MIN_TIER, Math.min(MAX_TIER, nextVal));
           return base;
         });
-      }, [setTierMap]);
+      },[setTierMap]);
 
-      const pool = useMemo(() => {
-        let p = Array.isArray(questions) ? questions : [];
-        if (safeFilter.tags.length) p = p.filter(q => q.tags.some(t => safeFilter.tags.includes(t)));
-        if (safeFilter.difficulty) p = p.filter(q => q.difficulty === safeFilter.difficulty);
-        if (mode === "mission"){
-          const firstTag = safeFilter.tags?.[0] || "BDG";
+      const pool = useMemo(()=>{
+        let p = QUESTIONS;
+        if(filterSafe.tags.length){
+          p = p.filter(q => q.tags.some(t => filterSafe.tags.includes(t)));
+        }
+        if(filterSafe.difficulty){
+          p = p.filter(q => q.difficulty === filterSafe.difficulty);
+        }
+        if(mode === 'mission'){
+          const firstTag = filterSafe.tags[0] || 'BDG';
           p = p.filter(q => q.tags.includes(firstTag));
         }
-        return weightedOrder(p, getTier);
-      }, [questions, safeFilter, mode, seed, getTier]);
+        const scored = p.map(q => {
+          const tier = getTierValue(q.id);
+          const weight = tierWeight(tier);
+          return { q, score: Math.random() ** (1/weight) };
+        }).sort((a,b)=>b.score - a.score);
+        return scored.map(entry => entry.q);
+      },[QUESTIONS, filterSafe, mode, getTierValue]);
 
       const current = pool.length ? pool[idx % pool.length] : null;
-      const rank = rankFor(score || 0);
-      const progress = pool.length ? ((idx % pool.length) / pool.length) * 100 : 0;
 
-      const stats = useMemo(()=>{
-        const result={};
-        for(const g of GROUPS){ result[g.key]={ total:0, attempted:0, correct:0, color:g.color, title:g.title }; }
-        for(const q of Array.isArray(questions)?questions:[]){
-          const group = GROUPS.find(g=>q.tags.some(t=>g.tags.includes(t))) || GROUPS[GROUPS.length-1];
-          const key = group.key;
-          result[key].total++;
-          const attempts = safeMetrics.attemptedIds?.[q.id] || 0;
-          const correct = safeMetrics.correctIds?.[q.id] || 0;
-          result[key].attempted += attempts;
-          result[key].correct += correct;
-        }
-        return result;
-      }, [questions, safeMetrics]);
-
-      const submitAnswer = (selectedDisplayIdx) => {
+      function submitAnswer(selectedDisplayIdx){
         if(!current) return;
-        const displayOrder = getDisplayOrder(current.id, idx);
+        const displayOrder = seededShuffle([0,1,2,3,4], `${current.id}#${idx}`);
         const toOriginal = (i) => displayOrder[i];
         const selectedOriginalIdx = selectedDisplayIdx.map(toOriginal);
         const correctSet = new Set(current.correct);
         const selectedSet = new Set(selectedOriginalIdx);
         const allOptions = current.choices.map((_,i)=>i);
-        const isExact = allOptions.every(i=>correctSet.has(i)===selectedSet.has(i));
+        const isExact = allOptions.every(i=>correctSet.has(i) === selectedSet.has(i));
         setShowExplain(true);
         if(isExact){
-          setScore(s=> (s || 0) + 10);
-          setStreak(s=> (s || 0) + 1);
-          setReview(prev => {
-            const list = Array.isArray(prev) ? prev : [];
-            return list.filter(id => id !== current.id);
-          });
-          adjustTier(current.id, +1);
+          setScore(s => (typeof s === 'number' ? s : 0) + 10);
+          setStreak(s => (typeof s === 'number' ? s : 0) + 1);
+          setReview(r => (Array.isArray(r) ? r.filter(id=>id!==current.id) : []));
+          setTierValue(current.id, val => val + 1);
         } else {
           setStreak(0);
-          setReview(prev => {
-            const list = Array.isArray(prev) ? prev : [];
-            return list.includes(current.id) ? list : [...list, current.id];
+          setReview(r => {
+            const list = Array.isArray(r) ? [...r] : [];
+            if(!list.includes(current.id)) list.push(current.id);
+            return list;
           });
-          adjustTier(current.id, -1);
+          setTierValue(current.id, val => val - 1);
         }
-        setMetrics(m=>{
-          const base = (m && typeof m === 'object') ? m : cloneValue(DEFAULT_METRICS);
+        setMetrics(m => {
+          const base = (m && typeof m === 'object') ? m : DEFAULT_METRICS;
           const attemptedIds = { ...(base.attemptedIds || {}) };
           const correctIds = { ...(base.correctIds || {}) };
           attemptedIds[current.id] = (attemptedIds[current.id] || 0) + 1;
@@ -800,190 +745,231 @@
             correctIds,
           };
         });
-      };
+      }
 
-      const next = () => {
-        setIdx(i => (i || 0) + 1);
+      function next(){
+        setIdx(i => (typeof i === 'number' ? i : 0) + 1);
         setShowExplain(false);
-      };
+      }
 
-      const toggleTag = (tag) => {
+      const stats = useMemo(()=>{
+        const result = {};
+        for(const g of GROUPS){
+          result[g.key] = { total:0, attempted:0, correct:0, color:g.color, title:g.title };
+        }
+        for(const q of QUESTIONS){
+          const group = GROUPS.find(g=>q.tags.some(t=>g.tags.includes(t))) || GROUPS[GROUPS.length-1];
+          const key = group.key;
+          result[key].total++;
+          const attempts = metricsSafe.attemptedIds?.[q.id] || 0;
+          const correct = metricsSafe.correctIds?.[q.id] || 0;
+          result[key].attempted += attempts;
+          result[key].correct += correct;
+        }
+        return result;
+      },[QUESTIONS, metricsSafe]);
+
+      const toggleTag = useCallback((tag) => {
         setFilter(prev => {
-          const base = (prev && typeof prev === 'object') ? prev : cloneValue(DEFAULT_FILTER);
-          const currentTags = Array.isArray(base.tags) ? base.tags : [];
-          const exists = currentTags.includes(tag);
-          const tags = exists ? currentTags.filter(t=>t!==tag) : [...currentTags, tag];
-          return { ...base, tags };
+          const base = (prev && typeof prev === 'object') ? prev : DEFAULT_FILTER;
+          const tags = Array.isArray(base.tags) ? base.tags : [];
+          const exists = tags.includes(tag);
+          const nextTags = exists ? tags.filter(t=>t!==tag) : [...tags, tag];
+          return { ...base, tags: nextTags };
         });
-      };
+      },[setFilter]);
 
       const resetProgress = () => {
-        if(!window.confirm('Fortschritt wirklich für dieses Profil löschen?')) return;
-        ['view','mode','filter','review','metrics','score','streak','idx','tiers'].forEach(key => localStorage.removeItem(`${userId}:${key}`));
-        setView('dashboard');
-        setMode('training');
-        setFilter(cloneValue(DEFAULT_FILTER));
+        setTierMap({});
         setReview([]);
-        setMetrics(cloneValue(DEFAULT_METRICS));
+        setMetrics(DEFAULT_METRICS);
         setScore(0);
         setStreak(0);
         setIdx(0);
-        setTierMap({});
-        setSeed(s=>s+1);
+        setFilter(DEFAULT_FILTER);
+        setMode('training');
+        setView('dashboard');
         setShowExplain(false);
+        alert('Fortschritt zurückgesetzt.');
       };
 
-      const uniqueTags = Array.from(new Set(GROUPS.flatMap(g=>g.tags)));
+      const rank = rankFor(typeof score === 'number' ? score : 0);
+      const reviewCount = Array.isArray(review) ? review.length : 0;
 
       return (
-        <div className="max-w-5xl mx-auto p-6 space-y-6">
-          <UserSwitcher users={users} activeUser={activeUser} onLogout={()=>setActiveUserId(null)} onSwitch={setActiveUserId} onChangePassword={openPasswordForm} />
-
-          {passwordFormOpen && (
-            <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">
-              <h3 className="font-semibold text-lg mb-4">Passwort ändern</h3>
-              <form onSubmit={submitPasswordChange} className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium mb-1">Aktuelles Passwort</label>
-                  <input type="password" value={passwordCurrent} onChange={e=>setPasswordCurrent(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Neues Passwort</label>
-                  <input type="password" value={passwordNew} onChange={e=>setPasswordNew(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" placeholder="mind. 4 Zeichen" />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium mb-1">Neues Passwort bestätigen</label>
-                  <input type="password" value={passwordConfirm} onChange={e=>setPasswordConfirm(e.target.value)} className="w-full px-3 py-2 rounded-lg border dark:border-gray-600 dark:bg-gray-900" />
-                </div>
-                {passwordStatus?.text && (
-                  <div className={`text-sm ${passwordStatus.type==='error' ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400'}`}>
-                    {passwordStatus.text}
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-2">
-                  <button type="submit" className="px-3 py-2 rounded-lg bg-blue-600 text-white">Speichern</button>
-                  <button type="button" onClick={resetPasswordForm} className="px-3 py-2 rounded-lg border dark:border-gray-600">Abbrechen</button>
-                </div>
-              </form>
-            </div>
-          )}
-
-          <header className="mb-2">
+        <div className="max-w-5xl mx-auto p-6">
+          <header className="mb-6">
             <div className="rounded-2xl p-6 bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow flex flex-wrap items-center gap-4 justify-between">
               <div>
                 <h1 className="text-2xl font-bold">Lerntool E1 / E2a</h1>
                 <p className="text-sm opacity-90">Prüfungsrealistisches MC-Training · 5 Optionen · Mehrfachauswahl · Antwortmischung · Spaced Repetition</p>
               </div>
-              <div className="flex gap-2 items-center flex-wrap">
-                <button onClick={()=>setView('dashboard')} className={`px-3 py-1 rounded-full border ${view==='dashboard'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Dashboard</button>
-                <button onClick={()=>setView('train')} className={`px-3 py-1 rounded-full border ${view==='train'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Training</button>
-                {activeUser.role === 'admin' && (
-                  <button onClick={()=>setView('admin')} className={`px-3 py-1 rounded-full border ${view==='admin'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Admin</button>
-                )}
-                <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className="px-3 py-1 rounded-full border bg-transparent border-white text-white hover:bg-white/10">
-                  {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
-                </button>
+              <div className="flex flex-col items-end gap-1 text-sm">
+                <span className="font-semibold">{activeUser?.username}</span>
+                <div className="flex gap-2 flex-wrap justify-end">
+                  <button onClick={()=>setView('dashboard')} className={`px-3 py-1 rounded-full border ${view==='dashboard'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Dashboard</button>
+                  <button onClick={()=>setView('train')} className={`px-3 py-1 rounded-full border ${view==='train'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Training</button>
+                  <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className="px-3 py-1 rounded-full border bg-transparent border-white text-white hover:bg-white/10">
+                    {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
+                  </button>
+                  <button onClick={onLogout} className="px-3 py-1 rounded-full border bg-transparent border-white text-white hover:bg-white/10">Abmelden</button>
+                </div>
               </div>
             </div>
           </header>
 
-          {view==='dashboard' && (<Dashboard stats={stats} rank={rank} score={score} reviewCount={safeReview.length} />)}
+          <div className="mb-6 grid md:grid-cols-3 gap-4">
+            <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Profil</div>
+              <div className="text-sm font-semibold mb-2">{activeUser?.username}</div>
+              <PasswordChangeForm onSubmit={onChangePassword} />
+            </div>
+            <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Modus</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {['training','exam','mission'].map(val => (
+                  <button key={val} onClick={()=>setMode(val)} className={`px-3 py-1 rounded-full border dark:border-gray-600 ${mode===val?'bg-blue-600 text-white':'bg-white dark:bg-gray-700 dark:text-gray-100'}`}>{val}</button>
+                ))}
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-3">Fortschritt zurücksetzen</div>
+              <button className="mt-2 px-3 py-1 rounded-lg border dark:border-gray-600" onClick={resetProgress}>Zurücksetzen</button>
+            </div>
+            <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
+              <div className="text-xs text-gray-500 dark:text-gray-400 mb-1">Filter</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {GROUPS.flatMap(g=>g.tags).filter((v,i,a)=>a.indexOf(v)===i).map(tag => {
+                  const active = filterSafe.tags.includes(tag);
+                  return (
+                    <button key={tag} onClick={()=>toggleTag(tag)} className={`px-3 py-1 rounded-full border dark:border-gray-600 ${active ? 'bg-blue-100 border-blue-400 dark:bg-blue-900/40' : 'bg-white dark:bg-gray-700 dark:text-gray-100'}`}>{tag}</button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          {view==='dashboard' && (<Dashboard stats={stats} rank={rank} score={typeof score === 'number' ? score : 0} reviewCount={reviewCount} />)}
 
           {view==='train' && (
             <>
               <div className="mb-4 grid lg:grid-cols-4 sm:grid-cols-2 grid-cols-1 gap-4">
-                <StatCard title="Trefferquote" value={`${safeMetrics.totalAttempts? Math.round((safeMetrics.totalCorrect/safeMetrics.totalAttempts)*100):0}%`} sub={`Richtig ${safeMetrics.totalCorrect} · Falsch ${Math.max(0, safeMetrics.totalAttempts - safeMetrics.totalCorrect)}`} />
-                <StatCard title="Beantwortet gesamt" value={safeMetrics.totalAttempts || 0} sub={`${Object.keys(safeMetrics.attemptedIds||{}).length} unterschiedliche Fragen`} />
+                <StatCard title="Trefferquote" value={`${metricsSafe.totalAttempts ? Math.round((metricsSafe.totalCorrect/metricsSafe.totalAttempts)*100) : 0}%`} sub={`Richtig ${metricsSafe.totalCorrect} · Falsch ${Math.max(0, metricsSafe.totalAttempts - metricsSafe.totalCorrect)}`} />
+                <StatCard title="Beantwortet gesamt" value={metricsSafe.totalAttempts} sub={`${Object.keys(metricsSafe.attemptedIds || {}).length} unterschiedliche Fragen`} />
                 <StatCard title="Streak" value={`${streak} 🔥`} sub="in Folge richtig" />
-                <StatCard title="Rang" value={rankFor(score || 0)} sub={`${score || 0} XP`} />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
-                <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Modus</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {["training","exam","mission"].map(val => (
-                      <button key={val} onClick={() => setMode(val)} className={`px-3 py-1 rounded-full border dark:border-gray-600 ${mode===val?"bg-blue-600 text-white":"bg-white dark:bg-gray-700 dark:text-gray-100"}`}>{val}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Filter</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    {uniqueTags.map(t => (
-                      <button key={t} onClick={() => toggleTag(t)} className={`px-3 py-1 rounded-full border dark:border-gray-600 ${ safeFilter.tags.includes(t)?"bg-blue-100 border-blue-400":"bg-white dark:bg-gray-700 dark:text-gray-100"}`}>{t}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="p-4 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow">
-                  <div className="text-xs text-gray-500 dark:text-gray-400">Einstellungen</div>
-                  <div className="mt-2 flex flex-wrap gap-2">
-                    <button className="px-3 py-1 rounded-lg border dark:border-gray-600" onClick={resetProgress}>Fortschritt zurücksetzen</button>
-                  </div>
-                </div>
+                <StatCard title="Rang" value={rank} sub={`${score} XP`} />
               </div>
 
               {current ? (
-                <QuestionCard q={current} idx={idx} submitted={showExplain} onSubmit={submitAnswer} onNext={next} getTier={getTier} />
+                <QuestionCard q={current} idx={idx} submitted={showExplain} onSubmit={submitAnswer} onNext={next} getTierValue={getTierValue} />
               ) : (
                 <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">Keine Fragen im aktuellen Filter.</div>
               )}
 
               <div className="mt-8 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">
                 <h3 className="font-semibold mb-2">Fragen importieren/exportieren (JSON)</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">Format: [{"{"}"id","question","choices":[5],"correct":[0,2,4],"explain":"...","law_ref":"...","tags":[...],"last_checked":"YYYY-MM-DD","difficulty":1{"}"}]</p>
+                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">Format: [{"id","question","choices":[5],"correct":[0,2,4],"explain":"...","law_ref":"...","tags":[...],"last_checked":"YYYY-MM-DD","difficulty":1}]</p>
                 <div className="flex gap-2 flex-wrap">
                   <button className="px-3 py-2 rounded-lg border dark:border-gray-600" onClick={() => {
-                    const blob = new Blob([JSON.stringify(questions, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.href = url; a.download = 'fragenbank-demo.json'; a.click(); URL.revokeObjectURL(url);
+                    const blob = new Blob([JSON.stringify(QUESTIONS, null, 2)], { type: 'application/json' });
+                    const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = 'fragenbank.json'; a.click(); URL.revokeObjectURL(url);
                   }}>Export</button>
 
                   <label className="px-3 py-2 rounded-lg border cursor-pointer dark:border-gray-600">Import
                     <input type="file" accept="application/json" className="hidden" onChange={async (e)=>{
-                      const file=e.target.files?.[0]; if(!file) return; const text=await file.text();
+                      const file = e.target.files?.[0]; if(!file) return;
                       try{
-                        const data=JSON.parse(text);
-                        const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) && Array.isArray(q.tags));
+                        const text = await file.text();
+                        const data = JSON.parse(text);
+                        const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && Array.isArray(q.tags));
                         if(!ok){ alert('Ungültiges Format.'); return; }
                         setQuestions(data);
                         alert(`Import erfolgreich: ${data.length} Fragen übernommen.`);
-                      }catch{ alert('Ungültiges JSON'); }
+                      }catch{ alert('Ungültiges JSON.'); }
                     }}/>
                   </label>
                 </div>
               </div>
-            </>
-          )}
 
-          {view==='admin' && activeUser.role === 'admin' && (
-            <AdminPanel questions={questions} setQuestions={setQuestions} />
+              {session?.activeUser?.role === 'admin' && (
+                <AdminPanel questions={QUESTIONS} setQuestions={setQuestions} />
+              )}
+            </>
           )}
         </div>
       );
     }
 
-    function App(){
-      const { questions, setQuestions } = useQuestions();
-      const [users, setUsers] = useUsers();
-      const [activeUserId, setActiveUserId] = useLocalStorage("activeUserId", null);
-      const [theme, setTheme] = useLocalStorage("theme","light");
-
+    function Root(){
+      const [userStore, setUserStore] = useLocalStorage('users', () => [DEFAULT_ADMIN_USER]);
+      const users = useMemo(() => normalizeUsers(userStore), [userStore]);
+      const setUsers = useCallback((updater) => {
+        setUserStore(prev => {
+          const base = normalizeUsers(prev);
+          const next = typeof updater === 'function' ? updater(base) : updater;
+          return normalizeUsers(next);
+        });
+      },[setUserStore]);
+      const [sessionState, setSessionState] = useLocalStorage('session', () => ({ activeUserId: null }));
+      const activeUser = useMemo(()=> users.find(u => u.id === sessionState?.activeUserId) || null, [users, sessionState]);
       useEffect(()=>{
-        if(theme === "dark"){ document.documentElement.classList.add("dark"); }
-        else { document.documentElement.classList.remove("dark"); }
-      },[theme]);
+        if(!activeUser){
+          setSessionState(prev => ({ ...(prev || {}), activeUserId: null }));
+        }
+      },[activeUser, setSessionState]);
+      const [authError, setAuthError] = useState('');
+      const [authMessage, setAuthMessage] = useState('');
 
-      const activeUser = users.find(u => u.id === activeUserId) || null;
+      const handleLogin = (username, password) => {
+        setAuthError(''); setAuthMessage('');
+        const user = users.find(u => u.username.toLowerCase() === username.toLowerCase());
+        if(!user){ setAuthError('Benutzer existiert nicht.'); return; }
+        if(!passwordsMatch(user.passwordHash, password)){ setAuthError('Passwort ist falsch.'); return; }
+        setSessionState(prev => ({ ...(prev || {}), activeUserId: user.id }));
+      };
 
-      if(!activeUser){
-        return <UserAuthPanel users={users} setUsers={setUsers} onLogin={setActiveUserId} theme={theme} setTheme={setTheme} />;
-      }
+      const handleRegister = (username, password) => {
+        setAuthError(''); setAuthMessage('');
+        if(users.some(u => u.username.toLowerCase() === username.toLowerCase())){ setAuthError('Benutzername bereits vergeben.'); return; }
+        const newUser = { id: generateId('user'), username, passwordHash: hashPassword(password), role:'user', createdAt:new Date().toISOString() };
+        setUsers(prev => [...prev, newUser]);
+        setSessionState(prev => ({ ...(prev || {}), activeUserId: newUser.id }));
+        setAuthMessage('Konto erstellt. Sie sind angemeldet.');
+      };
 
-      return <UserApp activeUser={activeUser} users={users} setUsers={setUsers} setActiveUserId={setActiveUserId} theme={theme} setTheme={setTheme} questions={questions} setQuestions={setQuestions} />;
+      const handleLogout = () => {
+        setSessionState(prev => ({ ...(prev || {}), activeUserId: null }));
+        setAuthError('');
+        setAuthMessage('');
+      };
+
+      const handlePasswordChange = (current, next) => {
+        if(!activeUser) return { ok:false, error:'Kein aktiver Nutzer.' };
+        if(!passwordsMatch(activeUser.passwordHash, current)){
+          return { ok:false, error:'Aktuelles Passwort ist falsch.' };
+        }
+        const newHash = hashPassword(next);
+        setUsers(prev => prev.map(u => u.id === activeUser.id ? { ...u, passwordHash: newHash } : u));
+        return { ok:true };
+      };
+
+      const sessionValue = useMemo(()=>({
+        activeUser,
+        users,
+        setUsers,
+        setActiveUserId: (id) => setSessionState(prev => ({ ...(prev || {}), activeUserId: id }))
+      }),[activeUser, users, setUsers, setSessionState]);
+
+      return (
+        <SessionContext.Provider value={sessionValue}>
+          {activeUser ? (
+            <MainApp onLogout={handleLogout} onChangePassword={handlePasswordChange} />
+          ) : (
+            <AuthScreen onLogin={handleLogin} onRegister={handleRegister} message={authMessage} error={authError} />
+          )}
+        </SessionContext.Provider>
+      );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
   </script>
 </body>
 </html>
