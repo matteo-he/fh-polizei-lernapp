@@ -108,7 +108,7 @@
       return value;
     }
 
-    function formatFirestoreError(error, fallbackMessage){
+    function formatFirestoreError(error, fallbackMessage, options = {}){
       const fallback = typeof fallbackMessage === "string" && fallbackMessage.trim()
         ? fallbackMessage.trim()
         : "Ein unbekannter Firestore-Fehler ist aufgetreten.";
@@ -123,8 +123,14 @@
           details.push(cleanedMessage);
         }
       }
-      if(!details.length) return fallback;
-      return `${fallback} (${details.join(' – ')})`;
+      const detailText = details.length ? ` (${details.join(' – ')})` : "";
+      if(details.includes('permission-denied')){
+        const hint = typeof options.permissionDeniedHint === "string" && options.permissionDeniedHint.trim()
+          ? options.permissionDeniedHint.trim()
+          : "Firestore hat den Zugriff verweigert. Prüfe deine Sicherheitsregeln oder melde dich mit einem berechtigten Konto an.";
+        return `${fallback} ${hint}${detailText}`;
+      }
+      return `${fallback}${detailText}`;
     }
 
     function ensureFiveChoices(list){
@@ -384,13 +390,17 @@
             }, (error) => {
               if(cancelled) return;
               console.error('[Firestore] Echtzeit-Listener-Fehler', error);
-              setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.'));
+              setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.', {
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe die Sicherheitsregeln für die Collection "${FIRESTORE_COLLECTION}" oder melde dich mit einem berechtigten Konto an.`,
+              }));
               setIsLoading(false);
             });
           } catch (error) {
             if(cancelled) return;
             console.error('[Firestore] Initialisierung fehlgeschlagen', error);
-            setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.'));
+            setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.', {
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe die Sicherheitsregeln für die Collection "${FIRESTORE_COLLECTION}" oder melde dich mit einem berechtigten Konto an.`,
+            }));
             setIsLoading(false);
           }
         })();
