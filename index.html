@@ -16,6 +16,7 @@
   <script type="module">
     import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
     import { getFirestore, collection, doc, writeBatch, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-auth.js";
 
     const firebaseConfig = {
       apiKey: "AIzaSyDLH5c69JKeFWcJyBpzRUfv720KjnnRIU8",
@@ -32,6 +33,52 @@
 
     const app = ensureApp();
     const db = getFirestore(app);
+    const auth = getAuth(app);
+
+    let resolveAuthReady;
+    let rejectAuthReady;
+    const authReady = new Promise((resolve, reject) => {
+      resolveAuthReady = resolve;
+      rejectAuthReady = reject;
+    });
+
+    let stopAuthListener;
+    let shouldStopAuthListener = false;
+    const stopAuthListenerIfReady = () => {
+      if(typeof stopAuthListener === 'function'){
+        stopAuthListener();
+        stopAuthListener = () => {};
+        shouldStopAuthListener = false;
+      } else {
+        shouldStopAuthListener = true;
+      }
+    };
+    stopAuthListener = onAuthStateChanged(auth, (user) => {
+      if(user && typeof resolveAuthReady === 'function'){
+        resolveAuthReady(user);
+        stopAuthListenerIfReady();
+      }
+    }, (error) => {
+      if(typeof rejectAuthReady === 'function'){
+        rejectAuthReady(error);
+      }
+      stopAuthListenerIfReady();
+    });
+    if(shouldStopAuthListener){
+      stopAuthListenerIfReady();
+    }
+
+    signInAnonymously(auth).catch((error) => {
+      console.error('[Firebase] Anonyme Anmeldung fehlgeschlagen', error);
+      if(typeof rejectAuthReady === 'function'){
+        rejectAuthReady(error);
+      }
+      stopAuthListenerIfReady();
+    });
+
+    function ensureAuthUser(){
+      return authReady;
+    }
 
     window.FIREBASE_BRIDGE = {
       config: firebaseConfig,
@@ -42,8 +89,14 @@
       writeBatch,
       onSnapshot,
       setDoc,
+      getAuth,
+      onAuthStateChanged,
+      signInAnonymously,
+      ensureAuthUser,
+      authReady,
       app,
       db,
+      auth,
     };
     window.__FIREBASE_BRIDGE_READY__ = true;
     window.dispatchEvent(new Event('firebase-bridge-ready'));
@@ -380,11 +433,14 @@
         setIsLoading(true);
         (async () => {
           try{
-            const { ensureApp, getFirestore, collection, onSnapshot } = firebaseBridge;
+            const { ensureApp, getFirestore, collection, onSnapshot, ensureAuthUser } = firebaseBridge;
             if(typeof ensureApp !== "function" || typeof getFirestore !== "function" || typeof collection !== "function" || typeof onSnapshot !== "function"){
               setIsLoading(false);
               setIsUsingFirestore(false);
               return;
+            }
+            if(typeof ensureAuthUser === "function"){
+              await ensureAuthUser();
             }
             const app = ensureApp();
             const db = getFirestore(app);
@@ -538,7 +594,7 @@
           docRefRef.current = null;
           return;
         }
-        const { ensureApp, getFirestore, doc, onSnapshot, setDoc } = firebaseBridge;
+        const { ensureApp, getFirestore, doc, onSnapshot, setDoc, ensureAuthUser } = firebaseBridge;
         if(typeof ensureApp !== "function" || typeof getFirestore !== "function" || typeof doc !== "function" || typeof onSnapshot !== "function" || typeof setDoc !== "function"){
           setIsUsingFirestore(false);
           setIsLoading(false);
@@ -550,6 +606,9 @@
         setIsLoading(true);
         (async () => {
           try{
+            if(typeof ensureAuthUser === "function"){
+              await ensureAuthUser();
+            }
             const app = ensureApp();
             const db = getFirestore(app);
             const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, userId);
@@ -699,8 +758,11 @@
         setIsLoading(true);
         (async () => {
           try {
-            const { ensureApp, getFirestore, collection, onSnapshot } = firebaseBridge;
+            const { ensureApp, getFirestore, collection, onSnapshot, ensureAuthUser } = firebaseBridge;
             const app = ensureApp();
+            if(typeof ensureAuthUser === 'function'){
+              await ensureAuthUser();
+            }
             const db = getFirestore(app);
             firestoreRef.current = db;
             syncQueue.current = Promise.resolve();
