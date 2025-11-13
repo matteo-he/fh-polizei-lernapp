@@ -272,6 +272,12 @@
       return [state,setState];
     }
 
+    const sortUsersByName = (list) => {
+      return Array.isArray(list)
+        ? [...list].sort((a,b) => a.username.localeCompare(b.username))
+        : [];
+    };
+
     function useUsers(){
       const [bridgeVersion, setBridgeVersion] = useState(() => window.__FIREBASE_BRIDGE_READY__ ? 1 : 0);
       const { config, isValid } = getFirebaseConfigInfo();
@@ -387,16 +393,29 @@
             const collectionRef = collection(db, FIRESTORE_USERS_COLLECTION);
             unsubscribe = onSnapshot(collectionRef, (snapshot) => {
               if(cancelled) return;
-              const remoteUsers = snapshot.docs
-                .map(doc => sanitizeUserFromRemote(doc.data(), doc.id))
-                .filter(Boolean)
-                .sort((a,b) => a.username.localeCompare(b.username));
+              const remoteUsers = sortUsersByName(
+                snapshot.docs
+                  .map(doc => sanitizeUserFromRemote(doc.data(), doc.id))
+                  .filter(Boolean)
+              );
               const cleaned = remoteUsers.filter(u => !(u.username === "Admin" && u.role === "admin" && u.passwordHash === hashPassword("admin")));
               const previousUsers = Array.isArray(usersStateRef.current) ? usersStateRef.current : [];
               let nextUsers = cleaned;
               if(!cleaned.length && previousUsers.length){
-                nextUsers = previousUsers;
-                pushChangesToFirestore(cleaned, previousUsers);
+                nextUsers = sortUsersByName(previousUsers);
+                pushChangesToFirestore(cleaned, nextUsers);
+              } else if(cleaned.length){
+                const remoteIds = new Set(cleaned.map(u => u.id));
+                const missingLocals = sortUsersByName(
+                  previousUsers
+                    .map(item => normalizeUserForStorage(item))
+                    .filter(Boolean)
+                    .filter(localUser => !remoteIds.has(localUser.id))
+                );
+                if(missingLocals.length){
+                  nextUsers = sortUsersByName([...cleaned, ...missingLocals]);
+                  pushChangesToFirestore(cleaned, nextUsers);
+                }
               }
               applyingRemote.current = true;
               setUsersState(nextUsers);
