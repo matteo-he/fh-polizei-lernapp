@@ -642,10 +642,12 @@
       return ({1:5,2:3,3:2,4:1.2,5:1}[tier] || 1);
     }
 
-    function weightedOrder(items, tierResolver){
+    function weightedOrder(items, tierResolver, seedStr = "default"){
       const resolve = typeof tierResolver === "function" ? tierResolver : (()=>2);
+      const seedFn = xmur3(String(seedStr || "default"));
+      const rng = mulberry32(seedFn());
       return [...items]
-        .map(x => ({ x, k: Math.random() ** (1 / tierWeight(resolve(x.id))) }))
+        .map(x => ({ x, k: (rng() || Number.EPSILON) ** (1 / tierWeight(resolve(x.id))) }))
         .sort((a,b) => b.k - a.k)
         .map(o => o.x);
     }
@@ -1478,6 +1480,8 @@
         });
       }, [setTierMap]);
 
+      const orderSeed = useMemo(() => `${userId || "anon"}#${seed}`, [userId, seed]);
+
       const pool = useMemo(() => {
         let p = Array.isArray(questions) ? questions : [];
         if (safeFilter.tags.length) p = p.filter(q => q.tags.some(t => safeFilter.tags.includes(t)));
@@ -1486,8 +1490,8 @@
           const firstTag = safeFilter.tags?.[0] || "BDG";
           p = p.filter(q => q.tags.includes(firstTag));
         }
-        return weightedOrder(p, getTier);
-      }, [questions, safeFilter, mode, seed, getTier]);
+        return weightedOrder(p, getTier, orderSeed);
+      }, [questions, safeFilter, mode, orderSeed, getTier]);
 
       const current = pool.length ? pool[idx % pool.length] : null;
       const lockedQuestionId = lockedQuestion ? lockedQuestion.id : null;
