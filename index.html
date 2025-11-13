@@ -391,7 +391,7 @@
               if(cancelled) return;
               console.error('[Firestore] Echtzeit-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe die Sicherheitsregeln für die Collection "${FIRESTORE_COLLECTION}" oder melde dich mit einem berechtigten Konto an.`,
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
               }));
               setIsLoading(false);
             });
@@ -399,7 +399,7 @@
             if(cancelled) return;
             console.error('[Firestore] Initialisierung fehlgeschlagen', error);
             setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.', {
-              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe die Sicherheitsregeln für die Collection "${FIRESTORE_COLLECTION}" oder melde dich mit einem berechtigten Konto an.`,
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
             }));
             setIsLoading(false);
           }
