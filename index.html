@@ -12,19 +12,40 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <!-- Babel (damit JSX direkt im Browser funktioniert) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <!-- Firebase SDKs (Compat-Version für einfache Einbindung) -->
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
-  <!-- Projektkonfiguration: Werte im Adminbereich der Firebase Console kopieren -->
-  <script>
-    window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
-      apiKey: "PASTE_API_KEY_HERE",
-      authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
-      projectId: "PASTE_PROJECT_ID",
-      storageBucket: "PASTE_PROJECT_ID.appspot.com",
-      messagingSenderId: "PASTE_SENDER_ID",
-      appId: "PASTE_APP_ID"
+  <!-- Firebase (modulares SDK) -->
+  <script type="module">
+    import { initializeApp, getApp, getApps } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-app.js";
+    import { getFirestore, collection, doc, writeBatch, onSnapshot } from "https://www.gstatic.com/firebasejs/12.5.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDLH5c69JKeFWcJyBpzRUfv720KjnnRIU8",
+      authDomain: "e1-und-e2a-lerntool.firebaseapp.com",
+      projectId: "e1-und-e2a-lerntool",
+      storageBucket: "e1-und-e2a-lerntool.firebasestorage.app",
+      messagingSenderId: "28649721297",
+      appId: "1:28649721297:web:432abbe98e34dd50fc24f0"
     };
+
+    function ensureApp(){
+      return getApps().length ? getApp() : initializeApp(firebaseConfig);
+    }
+
+    const app = ensureApp();
+    const db = getFirestore(app);
+
+    window.FIREBASE_BRIDGE = {
+      config: firebaseConfig,
+      ensureApp,
+      getFirestore,
+      collection,
+      doc,
+      writeBatch,
+      onSnapshot,
+      app,
+      db,
+    };
+    window.__FIREBASE_BRIDGE_READY__ = true;
+    window.dispatchEvent(new Event('firebase-bridge-ready'));
   </script>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
@@ -34,16 +55,17 @@
     const { useState, useEffect, useMemo, useCallback } = React;
 
     const FIRESTORE_COLLECTION = "questions";
-    const FIREBASE_PLACEHOLDER_REGEX = /(PASTE_|YOUR_)/i;
-    const firebaseAvailable = typeof firebase !== "undefined";
+
+    const getFirebaseBridge = () => window.FIREBASE_BRIDGE || null;
 
     function getFirebaseConfigInfo(){
-      const config = window.FIREBASE_CONFIG || null;
-      if(!config) return { config: null, isValid: false };
-      const values = Object.values(config);
-      const missingValue = values.some(v => typeof v !== "string" || !v.trim());
-      const hasPlaceholder = values.some(v => FIREBASE_PLACEHOLDER_REGEX.test(v));
-      return { config, isValid: firebaseAvailable && !missingValue && !hasPlaceholder };
+      const firebaseBridge = getFirebaseBridge();
+      if(!firebaseBridge) return { config: null, isValid: false };
+      const { config, app, db, ensureApp, getFirestore } = firebaseBridge;
+      const hasConfig = config && typeof config === "object";
+      const hasCore = typeof ensureApp === "function" && typeof getFirestore === "function";
+      const hasInstances = !!app && !!db;
+      return { config: hasConfig ? config : null, isValid: hasConfig && hasCore && hasInstances };
     }
 
     // ========= Utility =========
@@ -275,6 +297,7 @@
     const getDisplayOrder = (qid, idx) => seededShuffle([0,1,2,3,4], `${qid}#${idx}`);
 
     function useQuestions(){
+      const [bridgeVersion, setBridgeVersion] = useState(() => window.__FIREBASE_BRIDGE_READY__ ? 1 : 0);
       const { config, isValid } = getFirebaseConfigInfo();
       const [questionsState, setQuestionsState] = useState(() => {
         try {
@@ -294,12 +317,22 @@
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
 
+      useEffect(() => {
+        const handler = () => setBridgeVersion(v => v + 1);
+        window.addEventListener('firebase-bridge-ready', handler);
+        if(window.__FIREBASE_BRIDGE_READY__){
+          handler();
+        }
+        return () => window.removeEventListener('firebase-bridge-ready', handler);
+      }, []);
+
       const persistLocal = useCallback((list) => {
         try { localStorage.setItem('questions', JSON.stringify(list)); } catch {}
       }, []);
 
       useEffect(() => {
-        if(!isValid){
+        const firebaseBridge = getFirebaseBridge();
+        if(!isValid || !firebaseBridge){
           setIsLoading(false);
           setIsUsingFirestore(false);
           firestoreRef.current = null;
@@ -310,11 +343,13 @@
         setIsLoading(true);
         (async () => {
           try {
-            const app = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(config);
-            const db = app.firestore();
+            const { ensureApp, getFirestore, collection, onSnapshot } = firebaseBridge;
+            const app = ensureApp();
+            const db = getFirestore(app);
             firestoreRef.current = db;
             syncQueue.current = Promise.resolve();
-            unsubscribe = db.collection(FIRESTORE_COLLECTION).onSnapshot((snapshot) => {
+            const collectionRef = collection(db, FIRESTORE_COLLECTION);
+            unsubscribe = onSnapshot(collectionRef, (snapshot) => {
               if(cancelled) return;
               const remoteQuestions = snapshot.docs
                 .map(doc => sanitizeQuestionFromRemote(doc.data(), doc.id))
@@ -345,11 +380,14 @@
           if(typeof unsubscribe === 'function') unsubscribe();
           firestoreRef.current = null;
         };
-      }, [config, isValid, persistLocal]);
+      }, [config, isValid, persistLocal, bridgeVersion]);
 
       const pushChangesToFirestore = useCallback((previousList, nextList) => {
-        if(!firestoreRef.current) return;
+        const firebaseBridge = getFirebaseBridge();
+        if(!firestoreRef.current || !firebaseBridge) return;
         const db = firestoreRef.current;
+        const { writeBatch, doc } = firebaseBridge;
+        if(typeof writeBatch !== "function" || typeof doc !== "function") return;
         const prevMap = new Map(previousList.map(q => [q.id, q]));
         const operations = [];
 
@@ -376,9 +414,9 @@
         syncQueue.current = syncQueue.current.then(async () => {
           for(let i = 0; i < operations.length; i += 450){
             const slice = operations.slice(i, i + 450);
-            const batch = db.batch();
+            const batch = writeBatch(db);
             slice.forEach(op => {
-              const docRef = db.collection(FIRESTORE_COLLECTION).doc(op.id);
+              const docRef = doc(db, FIRESTORE_COLLECTION, op.id);
               if(op.type === 'delete') batch.delete(docRef);
               else batch.set(docRef, op.data);
             });
@@ -886,6 +924,7 @@
       if(!firestoreConfigured){
         statusBadges.push({
           key: 'config-missing',
+          text: 'Firebase-Initialisierung im HTML ergänzen, um Firestore zu aktivieren.',
           text: 'FIREBASE_CONFIG im HTML ergänzen, um Firestore zu aktivieren.',
           className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
         });
