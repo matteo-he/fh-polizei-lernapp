@@ -108,6 +108,25 @@
       return value;
     }
 
+    function formatFirestoreError(error, fallbackMessage){
+      const fallback = typeof fallbackMessage === "string" && fallbackMessage.trim()
+        ? fallbackMessage.trim()
+        : "Ein unbekannter Firestore-Fehler ist aufgetreten.";
+      if(!error || typeof error !== "object") return fallback;
+      const details = [];
+      if(typeof error.code === "string" && error.code.trim()){
+        details.push(error.code.trim());
+      }
+      if(typeof error.message === "string" && error.message.trim()){
+        const cleanedMessage = error.message.replace(/^.*?:\s*/, "").trim();
+        if(cleanedMessage && !details.includes(cleanedMessage)){
+          details.push(cleanedMessage);
+        }
+      }
+      if(!details.length) return fallback;
+      return `${fallback} (${details.join(' – ')})`;
+    }
+
     function ensureFiveChoices(list){
       const choices = Array.isArray(list) ? list.map(c => (typeof c === "string" ? c : "")).slice(0,5) : [];
       while(choices.length < 5){ choices.push(""); }
@@ -365,13 +384,13 @@
             }, (error) => {
               if(cancelled) return;
               console.error('[Firestore] Echtzeit-Listener-Fehler', error);
-              setSyncError('Live-Aktualisierung aus Firestore fehlgeschlagen.');
+              setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.'));
               setIsLoading(false);
             });
           } catch (error) {
             if(cancelled) return;
             console.error('[Firestore] Initialisierung fehlgeschlagen', error);
-            setSyncError('Firestore konnte nicht initialisiert werden.');
+            setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.'));
             setIsLoading(false);
           }
         })();
