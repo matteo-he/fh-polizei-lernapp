@@ -331,6 +331,12 @@
         : [];
     };
 
+    const sortQuestionsById = (list) => {
+      return Array.isArray(list)
+        ? [...list].sort((a,b) => a.id.localeCompare(b.id))
+        : [];
+    };
+
     function useUsers(){
       const [bridgeVersion, setBridgeVersion] = useState(() => window.__FIREBASE_BRIDGE_READY__ ? 1 : 0);
       const { config, isValid } = getFirebaseConfigInfo();
@@ -735,6 +741,11 @@
       const firestoreRef = React.useRef(null);
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
+      const questionsStateRef = React.useRef(questionsState);
+
+      useEffect(() => {
+        questionsStateRef.current = questionsState;
+      }, [questionsState]);
 
       useEffect(() => {
         const handler = () => setBridgeVersion(v => v + 1);
@@ -744,69 +755,6 @@
         }
         return () => window.removeEventListener('firebase-bridge-ready', handler);
       }, []);
-
-      const persistLocal = useCallback((list) => {
-        try { localStorage.setItem('questions', JSON.stringify(list)); } catch {}
-      }, []);
-
-      useEffect(() => {
-        const firebaseBridge = getFirebaseBridge();
-        if(!isValid || !firebaseBridge){
-          setIsLoading(false);
-          setIsUsingFirestore(false);
-          firestoreRef.current = null;
-          return;
-        }
-        let unsubscribe = () => {};
-        let cancelled = false;
-        setIsLoading(true);
-        (async () => {
-          try {
-            const { ensureApp, getFirestore, collection, onSnapshot, ensureAuthUser } = firebaseBridge;
-            const app = ensureApp();
-            if(typeof ensureAuthUser === 'function'){
-              await ensureAuthUser();
-            }
-            const db = getFirestore(app);
-            firestoreRef.current = db;
-            syncQueue.current = Promise.resolve();
-            const collectionRef = collection(db, FIRESTORE_COLLECTION);
-            unsubscribe = onSnapshot(collectionRef, (snapshot) => {
-              if(cancelled) return;
-              const remoteQuestions = snapshot.docs
-                .map(doc => sanitizeQuestionFromRemote(doc.data(), doc.id))
-                .filter(Boolean)
-                .sort((a,b) => a.id.localeCompare(b.id));
-              applyingRemote.current = true;
-              setQuestionsState(remoteQuestions);
-              applyingRemote.current = false;
-              persistLocal(remoteQuestions);
-              setIsUsingFirestore(true);
-              setIsLoading(false);
-              setSyncError(null);
-            }, (error) => {
-              if(cancelled) return;
-              console.error('[Firestore] Echtzeit-Listener-Fehler', error);
-              setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
-              }));
-              setIsLoading(false);
-            });
-          } catch (error) {
-            if(cancelled) return;
-            console.error('[Firestore] Initialisierung fehlgeschlagen', error);
-            setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.', {
-              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
-            }));
-            setIsLoading(false);
-          }
-        })();
-        return () => {
-          cancelled = true;
-          if(typeof unsubscribe === 'function') unsubscribe();
-          firestoreRef.current = null;
-        };
-      }, [config, isValid, persistLocal, bridgeVersion]);
 
       const pushChangesToFirestore = useCallback((previousList, nextList) => {
         const firebaseBridge = getFirebaseBridge();
@@ -854,6 +802,88 @@
           setSyncError('Änderungen konnten nicht nach Firestore geschrieben werden.');
         });
       }, []);
+
+      const persistLocal = useCallback((list) => {
+        try { localStorage.setItem('questions', JSON.stringify(list)); } catch {}
+      }, []);
+
+      useEffect(() => {
+        const firebaseBridge = getFirebaseBridge();
+        if(!isValid || !firebaseBridge){
+          setIsLoading(false);
+          setIsUsingFirestore(false);
+          firestoreRef.current = null;
+          return;
+        }
+        let unsubscribe = () => {};
+        let cancelled = false;
+        setIsLoading(true);
+        (async () => {
+          try {
+            const { ensureApp, getFirestore, collection, onSnapshot, ensureAuthUser } = firebaseBridge;
+            const app = ensureApp();
+            if(typeof ensureAuthUser === 'function'){
+              await ensureAuthUser();
+            }
+            const db = getFirestore(app);
+            firestoreRef.current = db;
+            syncQueue.current = Promise.resolve();
+            const collectionRef = collection(db, FIRESTORE_COLLECTION);
+            unsubscribe = onSnapshot(collectionRef, (snapshot) => {
+              if(cancelled) return;
+              const remoteQuestions = sortQuestionsById(
+                snapshot.docs
+                  .map(doc => sanitizeQuestionFromRemote(doc.data(), doc.id))
+                  .filter(Boolean)
+              );
+              const previousQuestions = sortQuestionsById(Array.isArray(questionsStateRef.current) ? questionsStateRef.current : []);
+              let nextQuestions = remoteQuestions;
+              if(!remoteQuestions.length && previousQuestions.length){
+                nextQuestions = previousQuestions;
+                pushChangesToFirestore(remoteQuestions, nextQuestions);
+              } else if(remoteQuestions.length){
+                const remoteIds = new Set(remoteQuestions.map(q => q.id));
+                const missingLocals = sortQuestionsById(
+                  previousQuestions
+                    .map(item => normalizeQuestionForStorage(item))
+                    .filter(Boolean)
+                    .filter(localQuestion => !remoteIds.has(localQuestion.id))
+                );
+                if(missingLocals.length){
+                  nextQuestions = sortQuestionsById([...remoteQuestions, ...missingLocals]);
+                  pushChangesToFirestore(remoteQuestions, nextQuestions);
+                }
+              }
+              applyingRemote.current = true;
+              setQuestionsState(nextQuestions);
+              applyingRemote.current = false;
+              persistLocal(nextQuestions);
+              setIsUsingFirestore(true);
+              setIsLoading(false);
+              setSyncError(null);
+            }, (error) => {
+              if(cancelled) return;
+              console.error('[Firestore] Echtzeit-Listener-Fehler', error);
+              setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.', {
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
+              }));
+              setIsLoading(false);
+            });
+          } catch (error) {
+            if(cancelled) return;
+            console.error('[Firestore] Initialisierung fehlgeschlagen', error);
+            setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.', {
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
+            }));
+            setIsLoading(false);
+          }
+        })();
+        return () => {
+          cancelled = true;
+          if(typeof unsubscribe === 'function') unsubscribe();
+          firestoreRef.current = null;
+        };
+      }, [config, isValid, persistLocal, bridgeVersion, pushChangesToFirestore]);
 
       const setQuestions = useCallback((updater) => {
         setQuestionsState(prevList => {
