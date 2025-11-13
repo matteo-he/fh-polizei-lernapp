@@ -12,12 +12,39 @@
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
   <!-- Babel (damit JSX direkt im Browser funktioniert) -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <!-- Firebase SDKs (Compat-Version für einfache Einbindung) -->
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore-compat.js"></script>
+  <!-- Projektkonfiguration: Werte im Adminbereich der Firebase Console kopieren -->
+  <script>
+    window.FIREBASE_CONFIG = window.FIREBASE_CONFIG || {
+      apiKey: "PASTE_API_KEY_HERE",
+      authDomain: "PASTE_PROJECT_ID.firebaseapp.com",
+      projectId: "PASTE_PROJECT_ID",
+      storageBucket: "PASTE_PROJECT_ID.appspot.com",
+      messagingSenderId: "PASTE_SENDER_ID",
+      appId: "PASTE_APP_ID"
+    };
+  </script>
 </head>
 <body class="bg-gray-50 text-gray-900 dark:bg-gray-900 dark:text-gray-100">
   <div id="root"></div>
 
   <script type="text/babel">
     const { useState, useEffect, useMemo, useCallback } = React;
+
+    const FIRESTORE_COLLECTION = "questions";
+    const FIREBASE_PLACEHOLDER_REGEX = /(PASTE_|YOUR_)/i;
+    const firebaseAvailable = typeof firebase !== "undefined";
+
+    function getFirebaseConfigInfo(){
+      const config = window.FIREBASE_CONFIG || null;
+      if(!config) return { config: null, isValid: false };
+      const values = Object.values(config);
+      const missingValue = values.some(v => typeof v !== "string" || !v.trim());
+      const hasPlaceholder = values.some(v => FIREBASE_PLACEHOLDER_REGEX.test(v));
+      return { config, isValid: firebaseAvailable && !missingValue && !hasPlaceholder };
+    }
 
     // ========= Utility =========
     function xmur3(str){
@@ -57,6 +84,56 @@
       if (Array.isArray(value)) return value.map(cloneValue);
       if (value && typeof value === "object") return JSON.parse(JSON.stringify(value));
       return value;
+    }
+
+    function ensureFiveChoices(list){
+      const choices = Array.isArray(list) ? list.map(c => (typeof c === "string" ? c : "")).slice(0,5) : [];
+      while(choices.length < 5){ choices.push(""); }
+      return choices;
+    }
+
+    function sanitizeQuestionFromRemote(data, fallbackId){
+      if(!data) return null;
+      const id = typeof data.id === "string" && data.id.trim() ? data.id.trim() : (typeof fallbackId === "string" ? fallbackId : "");
+      const questionText = typeof data.question === "string" ? data.question.trim() : "";
+      if(!id || !questionText.trim()) return null;
+      const choices = ensureFiveChoices(data.choices);
+      const correct = Array.isArray(data.correct)
+        ? Array.from(new Set(data.correct.filter(n => Number.isInteger(n) && n >= 0 && n < 5))).sort((a,b) => a-b)
+        : [];
+      const tags = Array.isArray(data.tags)
+        ? data.tags.map(t => (typeof t === "string" ? t : String(t || ""))).map(t => t.trim()).filter(Boolean)
+        : [];
+      const difficultyRaw = Number(data.difficulty);
+      const difficulty = Number.isFinite(difficultyRaw) ? Math.min(Math.max(Math.round(difficultyRaw), 1), 5) : 1;
+      const lastChecked = typeof data.last_checked === "string" && data.last_checked.trim()
+        ? data.last_checked.trim()
+        : new Date().toISOString().slice(0,10);
+
+      return {
+        id,
+        question: questionText,
+        choices,
+        correct,
+        explain: typeof data.explain === "string" ? data.explain : "",
+        law_ref: typeof data.law_ref === "string" ? data.law_ref : "",
+        tags,
+        last_checked: lastChecked,
+        difficulty,
+      };
+    }
+
+    function normalizeQuestionForStorage(question){
+      if(!question || typeof question !== "object") return null;
+      const normalized = sanitizeQuestionFromRemote(question, question.id || "");
+      if(!normalized) return null;
+      return {
+        ...normalized,
+        choices: normalized.choices.map(c => c.trim()),
+        question: normalized.question.trim(),
+        explain: normalized.explain.trim(),
+        law_ref: normalized.law_ref.trim(),
+      };
     }
 
     function hashPassword(str=""){
@@ -198,18 +275,147 @@
     const getDisplayOrder = (qid, idx) => seededShuffle([0,1,2,3,4], `${qid}#${idx}`);
 
     function useQuestions(){
-      const [questions, setQuestions] = useState(() => {
+      const { config, isValid } = getFirebaseConfigInfo();
+      const [questionsState, setQuestionsState] = useState(() => {
         try {
           const saved = JSON.parse(localStorage.getItem('questions') || 'null');
-          return (saved && Array.isArray(saved)) ? saved : DEFAULT_QUESTIONS;
-        } catch {
-          return DEFAULT_QUESTIONS;
-        }
+          if(saved && Array.isArray(saved)){
+            const sanitized = saved.map(item => normalizeQuestionForStorage(item)).filter(Boolean);
+            if(sanitized.length) return sanitized;
+          }
+        } catch {}
+        return DEFAULT_QUESTIONS.map(item => normalizeQuestionForStorage(item)).filter(Boolean);
       });
+      const [isUsingFirestore, setIsUsingFirestore] = useState(false);
+      const [isLoading, setIsLoading] = useState(isValid);
+      const [syncError, setSyncError] = useState(null);
+
+      const firestoreRef = React.useRef(null);
+      const applyingRemote = React.useRef(false);
+      const syncQueue = React.useRef(Promise.resolve());
+
+      const persistLocal = useCallback((list) => {
+        try { localStorage.setItem('questions', JSON.stringify(list)); } catch {}
+      }, []);
+
       useEffect(() => {
-        try { localStorage.setItem('questions', JSON.stringify(questions)); } catch {}
-      }, [questions]);
-      return { questions, setQuestions };
+        if(!isValid){
+          setIsLoading(false);
+          setIsUsingFirestore(false);
+          firestoreRef.current = null;
+          return;
+        }
+        let unsubscribe = () => {};
+        let cancelled = false;
+        setIsLoading(true);
+        (async () => {
+          try {
+            const app = firebase.apps && firebase.apps.length ? firebase.app() : firebase.initializeApp(config);
+            const db = app.firestore();
+            firestoreRef.current = db;
+            syncQueue.current = Promise.resolve();
+            unsubscribe = db.collection(FIRESTORE_COLLECTION).onSnapshot((snapshot) => {
+              if(cancelled) return;
+              const remoteQuestions = snapshot.docs
+                .map(doc => sanitizeQuestionFromRemote(doc.data(), doc.id))
+                .filter(Boolean)
+                .sort((a,b) => a.id.localeCompare(b.id));
+              applyingRemote.current = true;
+              setQuestionsState(remoteQuestions);
+              applyingRemote.current = false;
+              persistLocal(remoteQuestions);
+              setIsUsingFirestore(true);
+              setIsLoading(false);
+              setSyncError(null);
+            }, (error) => {
+              if(cancelled) return;
+              console.error('[Firestore] Echtzeit-Listener-Fehler', error);
+              setSyncError('Live-Aktualisierung aus Firestore fehlgeschlagen.');
+              setIsLoading(false);
+            });
+          } catch (error) {
+            if(cancelled) return;
+            console.error('[Firestore] Initialisierung fehlgeschlagen', error);
+            setSyncError('Firestore konnte nicht initialisiert werden.');
+            setIsLoading(false);
+          }
+        })();
+        return () => {
+          cancelled = true;
+          if(typeof unsubscribe === 'function') unsubscribe();
+          firestoreRef.current = null;
+        };
+      }, [config, isValid, persistLocal]);
+
+      const pushChangesToFirestore = useCallback((previousList, nextList) => {
+        if(!firestoreRef.current) return;
+        const db = firestoreRef.current;
+        const prevMap = new Map(previousList.map(q => [q.id, q]));
+        const operations = [];
+
+        previousList.forEach(q => {
+          if(q && q.id && !nextList.some(n => n && n.id === q.id)){
+            operations.push({ type: 'delete', id: q.id });
+          }
+        });
+
+        nextList.forEach(q => {
+          const normalized = normalizeQuestionForStorage(q);
+          if(!normalized) return;
+          const prevNormalized = prevMap.get(normalized.id);
+          if(!prevNormalized || JSON.stringify(prevNormalized) !== JSON.stringify(normalized)){
+            operations.push({ type: 'set', id: normalized.id, data: normalized });
+          }
+        });
+
+        if(!operations.length){
+          setSyncError(null);
+          return;
+        }
+
+        syncQueue.current = syncQueue.current.then(async () => {
+          for(let i = 0; i < operations.length; i += 450){
+            const slice = operations.slice(i, i + 450);
+            const batch = db.batch();
+            slice.forEach(op => {
+              const docRef = db.collection(FIRESTORE_COLLECTION).doc(op.id);
+              if(op.type === 'delete') batch.delete(docRef);
+              else batch.set(docRef, op.data);
+            });
+            await batch.commit();
+          }
+          setSyncError(null);
+        }).catch(error => {
+          console.error('[Firestore] Synchronisation fehlgeschlagen', error);
+          setSyncError('Änderungen konnten nicht nach Firestore geschrieben werden.');
+        });
+      }, []);
+
+      const setQuestions = useCallback((updater) => {
+        setQuestionsState(prevList => {
+          const previous = Array.isArray(prevList) ? prevList : [];
+          const inputForUpdater = cloneValue(previous);
+          const resolved = typeof updater === 'function' ? updater(inputForUpdater) : updater;
+          const nextSanitized = Array.isArray(resolved)
+            ? resolved.map(item => normalizeQuestionForStorage(item)).filter(Boolean)
+            : previous;
+          persistLocal(nextSanitized);
+          if(firestoreRef.current && !applyingRemote.current){
+            pushChangesToFirestore(previous, nextSanitized);
+          }
+          return nextSanitized;
+        });
+      }, [persistLocal, pushChangesToFirestore]);
+
+      return {
+        questions: questionsState,
+        setQuestions,
+        isUsingFirestore,
+        isLoading,
+        syncError,
+        firestoreConfigured: !!config,
+        firebaseConfigValid: isValid,
+      };
     }
 
     function Chip({ children, className="" }){
@@ -629,11 +835,19 @@
       );
     }
 
-    function AdminPanel({ questions, setQuestions }){
+    function AdminPanel({ questions, setQuestions, questionMeta }){
       const [mode, setMode] = useState("list");
       const [draft, setDraft] = useState(null);
       const [message, setMessage] = useState("");
       const [error, setError] = useState("");
+
+      const {
+        isUsingFirestore = false,
+        isLoading: isSyncLoading = false,
+        syncError = null,
+        firestoreConfigured = false,
+        firebaseConfigValid = false,
+      } = questionMeta || {};
 
       useEffect(() => {
         if(message){
@@ -641,6 +855,48 @@
           return () => clearTimeout(t);
         }
       }, [message]);
+
+      const statusBadges = [];
+      if(isUsingFirestore){
+        statusBadges.push({
+          key: 'firestore-active',
+          text: 'Firestore verbunden',
+          className: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200'
+        });
+      } else if(firebaseConfigValid){
+        statusBadges.push({
+          key: 'firestore-loading',
+          text: isSyncLoading ? 'Verbindung zu Firestore wird aufgebaut…' : 'Firestore-Konfiguration erkannt',
+          className: 'bg-blue-100 text-blue-800 dark:bg-blue-900/60 dark:text-blue-200'
+        });
+      } else {
+        statusBadges.push({
+          key: 'local-storage',
+          text: 'Lokale Speicherung aktiv',
+          className: 'bg-gray-200 text-gray-700 dark:bg-gray-700 dark:text-gray-200'
+        });
+      }
+      if(!firebaseConfigValid && firestoreConfigured){
+        statusBadges.push({
+          key: 'config-incomplete',
+          text: 'Firebase-Konfiguration vervollständigen.',
+          className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
+        });
+      }
+      if(!firestoreConfigured){
+        statusBadges.push({
+          key: 'config-missing',
+          text: 'FIREBASE_CONFIG im HTML ergänzen, um Firestore zu aktivieren.',
+          className: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200'
+        });
+      }
+      if(syncError){
+        statusBadges.push({
+          key: 'sync-error',
+          text: syncError,
+          className: 'bg-red-100 text-red-800 dark:bg-red-900/60 dark:text-red-200'
+        });
+      }
 
       const startEdit = (q) => {
         setDraft({ ...q, choices:[...q.choices], correct:[...q.correct], tags:[...q.tags] });
@@ -651,6 +907,15 @@
       const startCreate = () => {
         setDraft({ id:"", question:"", choices:["","","","",""], correct:[], explain:"", law_ref:"", tags:[], last_checked:new Date().toISOString().slice(0,10), difficulty:1 });
         setMode("create");
+        setError("");
+      };
+
+      const seedDefaultQuestions = () => {
+        if(!DEFAULT_QUESTIONS.length) return;
+        const confirmed = window.confirm('Standardfragen übernehmen? Dadurch werden bestehende Fragen überschrieben.');
+        if(!confirmed) return;
+        setQuestions(DEFAULT_QUESTIONS);
+        setMessage(`${DEFAULT_QUESTIONS.length} Standardfragen übernommen.`);
         setError("");
       };
 
@@ -713,6 +978,22 @@
               <button onClick={startCreate} className="px-3 py-2 rounded-lg bg-green-600 text-white">Neue Frage</button>
             )}
           </div>
+          {statusBadges.length > 0 && (
+            <div className="flex flex-wrap gap-2 text-xs">
+              {statusBadges.map(badge => (
+                <span key={badge.key} className={`px-2 py-1 rounded-full ${badge.className}`}>{badge.text}</span>
+              ))}
+            </div>
+          )}
+          {firebaseConfigValid && !questions.length && (
+            <div className="p-4 border border-dashed border-blue-300 dark:border-blue-500 rounded-xl text-sm space-y-2">
+              <p>Deine Firestore-Sammlung enthält noch keine Fragen. Du kannst die Standardfragen übernehmen oder per Import eigene Fragen hochladen.</p>
+              <div className="flex flex-wrap items-center gap-3">
+                <button onClick={seedDefaultQuestions} className="px-3 py-2 rounded-lg bg-blue-600 text-white">Standardfragen laden</button>
+                <span className="text-xs text-gray-600 dark:text-gray-300">Alternativ: JSON importieren oder eine neue Frage erstellen.</span>
+              </div>
+            </div>
+          )}
           {message && <div className="text-sm text-green-600 dark:text-green-300">{message}</div>}
           {error && <div className="text-sm text-red-600 dark:text-red-400">{error}</div>}
           {mode === "list" ? (
@@ -736,7 +1017,7 @@
       );
     }
 
-    function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions }){
+    function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions, questionMeta }){
       const userId = activeUser.id;
       const [view, setView] = useUserLocalStorage(userId, "view", "dashboard");
       const [mode, setMode] = useUserLocalStorage(userId, "mode", "training");
@@ -1021,14 +1302,22 @@
           )}
 
           {view==='admin' && activeUser.role === 'admin' && (
-            <AdminPanel questions={questions} setQuestions={setQuestions} />
+            <AdminPanel questions={questions} setQuestions={setQuestions} questionMeta={questionMeta} />
           )}
         </div>
       );
     }
 
     function App(){
-      const { questions, setQuestions } = useQuestions();
+      const {
+        questions,
+        setQuestions,
+        isUsingFirestore,
+        isLoading,
+        syncError,
+        firestoreConfigured,
+        firebaseConfigValid,
+      } = useQuestions();
       const [users, setUsers] = useUsers();
       const [activeUserId, setActiveUserId] = useLocalStorage("activeUserId", null);
       const [theme, setTheme] = useLocalStorage("theme","light");
@@ -1044,7 +1333,9 @@
         return <UserAuthPanel users={users} setUsers={setUsers} onLogin={setActiveUserId} theme={theme} setTheme={setTheme} />;
       }
 
-      return <UserApp activeUser={activeUser} users={users} setUsers={setUsers} setActiveUserId={setActiveUserId} theme={theme} setTheme={setTheme} questions={questions} setQuestions={setQuestions} />;
+      const questionMeta = { isUsingFirestore, isLoading, syncError, firestoreConfigured, firebaseConfigValid };
+
+      return <UserApp activeUser={activeUser} users={users} setUsers={setUsers} setActiveUserId={setActiveUserId} theme={theme} setTheme={setTheme} questions={questions} setQuestions={setQuestions} questionMeta={questionMeta} />;
     }
 
     ReactDOM.createRoot(document.getElementById('root')).render(<App />);
