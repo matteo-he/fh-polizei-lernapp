@@ -380,6 +380,10 @@
         return () => window.removeEventListener('firebase-bridge-ready', handler);
       }, []);
 
+      useEffect(() => {
+        setDocChoiceIndex(0);
+      }, [userId]);
+
       const persistLocal = useCallback((list) => {
         try{ localStorage.setItem("users", JSON.stringify(list)); }catch{}
       }, []);
@@ -547,6 +551,10 @@
       const [isLoading, setIsLoading] = useState(false);
       const [syncError, setSyncError] = useState(null);
 
+      const [docChoiceIndex, setDocChoiceIndex] = useState(0);
+
+      const firestoreFieldKey = useMemo(() => (userId ? `${userId}:${key}` : null), [userId, key]);
+
       const docRefRef = React.useRef(null);
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
@@ -588,6 +596,10 @@
         return () => window.removeEventListener('firebase-bridge-ready', handler);
       }, []);
 
+      useEffect(() => {
+        setDocChoiceIndex(0);
+      }, [userId]);
+
       const persistLocal = useCallback((value) => {
         if(!storageKey) return;
         localValueRef.current = cloneValue(value);
@@ -620,19 +632,35 @@
         setIsLoading(true);
         (async () => {
           try{
-            if(typeof ensureAuthUser === "function"){
-              await ensureAuthUser();
+            const authUser = typeof ensureAuthUser === "function" ? await ensureAuthUser() : null;
+            if(!authUser || !authUser.uid){
+              throw new Error('Kein Auth-User für Fortschritt verfügbar');
             }
+            const docVariants = [];
+            docVariants.push({ id: authUser.uid, label: 'auth' });
+            if(userId && userId !== authUser.uid){
+              docVariants.push({ id: userId, label: 'profile' });
+            }
+            if(docVariants.length === 0){
+              throw new Error('Keine geeignete Dokument-ID für Fortschritt gefunden');
+            }
+            const choiceIndex = Math.min(docChoiceIndex, docVariants.length - 1);
+            if(choiceIndex !== docChoiceIndex){
+              setDocChoiceIndex(choiceIndex);
+              setIsLoading(false);
+              return;
+            }
+            const { id: chosenDocId } = docVariants[choiceIndex];
             const app = ensureApp();
             const db = getFirestore(app);
-            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, userId);
+            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, chosenDocId);
             docRefRef.current = docRef;
             syncQueue.current = Promise.resolve();
             unsubscribe = onSnapshot(docRef, (snapshot) => {
               if(cancelled) return;
               const data = snapshot.exists() ? (snapshot.data() || {}) : {};
-              const hasKey = Object.prototype.hasOwnProperty.call(data, key);
-              const remoteValue = hasKey ? cloneValue(data[key]) : cloneValue(localValueRef.current);
+              const hasKey = firestoreFieldKey && Object.prototype.hasOwnProperty.call(data, firestoreFieldKey);
+              const remoteValue = hasKey ? cloneValue(data[firestoreFieldKey]) : cloneValue(localValueRef.current);
               applyingRemote.current = true;
               setState(remoteValue);
               applyingRemote.current = false;
@@ -643,10 +671,15 @@
               if(!hasKey){
                 const docRefSnapshot = docRefRef.current;
                 const firebaseBridge = getFirebaseBridge();
-                if(docRefSnapshot && firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
-                  const { setDoc } = firebaseBridge;
+                if(docRefSnapshot && firebaseBridge && typeof firebaseBridge.setDoc === 'function' && firestoreFieldKey){
+                  const { setDoc, ensureAuthUser } = firebaseBridge;
                   const payload = cloneValue(localValueRef.current);
-                  syncQueue.current = syncQueue.current.then(() => setDoc(docRefSnapshot, { [key]: payload }, { merge: true })).catch(error => {
+                  syncQueue.current = syncQueue.current.then(async () => {
+                    if(typeof ensureAuthUser === "function"){
+                      await ensureAuthUser();
+                    }
+                    await setDoc(docRefSnapshot, { [firestoreFieldKey]: payload }, { merge: true });
+                  }).catch(error => {
                     console.error('[Firestore] Fortschritt konnte nicht initial hochgeladen werden', error);
                     setSyncError('Lokaler Fortschritt konnte nicht nach Firestore übertragen werden.');
                   });
@@ -654,14 +687,33 @@
               }
             }, (error) => {
               if(cancelled) return;
+              if(error && error.code === 'permission-denied' && docChoiceIndex + 1 < docVariants.length){
+                console.warn(`[Firestore] Fortschritt-Listener mit Doc-ID ${chosenDocId} blockiert, versuche nächsten Kandidaten`);
+                if(typeof unsubscribe === 'function') unsubscribe();
+                setDocChoiceIndex((i) => Math.min(i + 1, docVariants.length - 1));
+                setIsLoading(false);
+                return;
+              }
               console.error('[Firestore] Fortschritt-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Fortschritt konnte nicht aus Firestore geladen werden.', {
                 permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
               }));
               setIsLoading(false);
+              if(!cancelled && error && error.code === 'permission-denied' && typeof ensureAuthUser === 'function'){
+                ensureAuthUser().then(() => {
+                  setBridgeVersion((v) => v + 1);
+                }).catch((authError) => {
+                  console.warn('[Firestore] Re-Auth nach Berechtigungsfehler fehlgeschlagen', authError);
+                });
+              }
             });
           }catch(error){
             if(cancelled) return;
+            if(error && error.code === 'permission-denied' && docChoiceIndex > 0){
+              setDocChoiceIndex(0);
+              setIsLoading(false);
+              return;
+            }
             console.error('[Firestore] Fortschritt-Initialisierung fehlgeschlagen', error);
             setSyncError(formatFirestoreError(error, 'Firestore konnte für den Fortschritt nicht initialisiert werden.', {
               permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
@@ -674,7 +726,7 @@
           if(typeof unsubscribe === 'function') unsubscribe();
           docRefRef.current = null;
         };
-      }, [userId, key, persistLocal, bridgeVersion]);
+      }, [userId, key, persistLocal, bridgeVersion, firestoreFieldKey, docChoiceIndex]);
 
       const setStateWithSync = useCallback((updater) => {
         setState(prevState => {
@@ -683,12 +735,17 @@
           const next = cloneValue(resolved);
           persistLocal(next);
           const docRefSnapshot = docRefRef.current;
-          if(docRefSnapshot && !applyingRemote.current){
+          if(docRefSnapshot && !applyingRemote.current && firestoreFieldKey){
             const firebaseBridge = getFirebaseBridge();
             if(firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
-              const { setDoc } = firebaseBridge;
+              const { setDoc, ensureAuthUser } = firebaseBridge;
               const payload = cloneValue(next);
-              syncQueue.current = syncQueue.current.then(() => setDoc(docRefSnapshot, { [key]: payload }, { merge: true })).then(() => {
+              syncQueue.current = syncQueue.current.then(async () => {
+                if(typeof ensureAuthUser === "function"){
+                  await ensureAuthUser();
+                }
+                await setDoc(docRefSnapshot, { [firestoreFieldKey]: payload }, { merge: true });
+              }).then(() => {
                 setSyncError(null);
                 setIsUsingFirestore(true);
               }).catch(error => {
@@ -699,7 +756,7 @@
           }
           return next;
         });
-      }, [key, persistLocal]);
+      }, [key, persistLocal, firestoreFieldKey]);
 
       const meta = useMemo(() => ({ isUsingFirestore, isLoading, syncError }), [isUsingFirestore, isLoading, syncError]);
 
@@ -1549,7 +1606,9 @@
 
     function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions, questionMeta, userMeta }){
       const userId = activeUser.id;
-      const [view, setView] = useUserLocalStorage(userId, "view", "dashboard");
+      const viewState = useUserLocalStorage(userId, "view", "dashboard");
+      const [view, setView] = viewState;
+      const progressMeta = viewState?.meta || {};
       const [mode, setMode] = useUserLocalStorage(userId, "mode", "training");
       const [filter, setFilter] = useUserLocalStorage(userId, "filter", DEFAULT_FILTER);
       const [review, setReview] = useUserLocalStorage(userId, "review", []);
@@ -1741,6 +1800,20 @@
       const activeQuestion = showExplain && lockedQuestion ? lockedQuestion : current;
       const activeIdx = showExplain && lockedIdx !== null ? lockedIdx : idx;
 
+      const progressStatus = (() => {
+        if(!userId) return null;
+        if(progressMeta.syncError){
+          return { tone: 'error', text: progressMeta.syncError };
+        }
+        if(progressMeta.isLoading){
+          return { tone: 'info', text: 'Fortschritt wird mit Firestore verbunden …' };
+        }
+        if(progressMeta.isUsingFirestore){
+          return null;
+        }
+        return { tone: 'warning', text: 'Fortschritt wird derzeit nur lokal gespeichert. Prüfe die Firestore-Regeln für "userProgress" oder die anonyme Anmeldung.' };
+      })();
+
       return (
         <div className="max-w-5xl mx-auto p-6 space-y-6">
           {userSyncError ? (
@@ -1750,6 +1823,16 @@
           ) : usersUsingFirestore ? (
             <div className="p-3 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">Profiländerungen werden automatisch zwischen Geräten synchronisiert.</div>
           ) : null}
+
+          {progressStatus && (
+            <div className={`p-3 rounded-xl border ${progressStatus.tone === 'error'
+              ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/30 dark:border-red-700 dark:text-red-100'
+              : progressStatus.tone === 'info'
+              ? 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-100'
+              : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-100'}`}>
+              {progressStatus.text}
+            </div>
+          )}
 
           <UserSwitcher users={users} activeUser={activeUser} onLogout={()=>setActiveUserId(null)} onSwitch={setActiveUserId} />
 
