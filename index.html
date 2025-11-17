@@ -664,6 +664,13 @@
                 permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
               }));
               setIsLoading(false);
+              if(!cancelled && error && error.code === 'permission-denied' && typeof ensureAuthUser === 'function'){
+                ensureAuthUser().then(() => {
+                  setBridgeVersion((v) => v + 1);
+                }).catch((authError) => {
+                  console.warn('[Firestore] Re-Auth nach Berechtigungsfehler fehlgeschlagen', authError);
+                });
+              }
             });
           }catch(error){
             if(cancelled) return;
