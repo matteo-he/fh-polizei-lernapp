@@ -547,6 +547,8 @@
       const [isLoading, setIsLoading] = useState(false);
       const [syncError, setSyncError] = useState(null);
 
+      const firestoreFieldKey = useMemo(() => (userId ? `${userId}:${key}` : null), [userId, key]);
+
       const docRefRef = React.useRef(null);
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
@@ -620,19 +622,20 @@
         setIsLoading(true);
         (async () => {
           try{
-            if(typeof ensureAuthUser === "function"){
-              await ensureAuthUser();
+            const authUser = typeof ensureAuthUser === "function" ? await ensureAuthUser() : null;
+            if(!authUser || !authUser.uid){
+              throw new Error('Kein Auth-User für Fortschritt verfügbar');
             }
             const app = ensureApp();
             const db = getFirestore(app);
-            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, userId);
+            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, authUser.uid);
             docRefRef.current = docRef;
             syncQueue.current = Promise.resolve();
             unsubscribe = onSnapshot(docRef, (snapshot) => {
               if(cancelled) return;
               const data = snapshot.exists() ? (snapshot.data() || {}) : {};
-              const hasKey = Object.prototype.hasOwnProperty.call(data, key);
-              const remoteValue = hasKey ? cloneValue(data[key]) : cloneValue(localValueRef.current);
+              const hasKey = firestoreFieldKey && Object.prototype.hasOwnProperty.call(data, firestoreFieldKey);
+              const remoteValue = hasKey ? cloneValue(data[firestoreFieldKey]) : cloneValue(localValueRef.current);
               applyingRemote.current = true;
               setState(remoteValue);
               applyingRemote.current = false;
@@ -643,14 +646,14 @@
               if(!hasKey){
                 const docRefSnapshot = docRefRef.current;
                 const firebaseBridge = getFirebaseBridge();
-                if(docRefSnapshot && firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
+                if(docRefSnapshot && firebaseBridge && typeof firebaseBridge.setDoc === 'function' && firestoreFieldKey){
                   const { setDoc, ensureAuthUser } = firebaseBridge;
                   const payload = cloneValue(localValueRef.current);
                   syncQueue.current = syncQueue.current.then(async () => {
                     if(typeof ensureAuthUser === "function"){
                       await ensureAuthUser();
                     }
-                    await setDoc(docRefSnapshot, { [key]: payload }, { merge: true });
+                    await setDoc(docRefSnapshot, { [firestoreFieldKey]: payload }, { merge: true });
                   }).catch(error => {
                     console.error('[Firestore] Fortschritt konnte nicht initial hochgeladen werden', error);
                     setSyncError('Lokaler Fortschritt konnte nicht nach Firestore übertragen werden.');
@@ -686,7 +689,7 @@
           if(typeof unsubscribe === 'function') unsubscribe();
           docRefRef.current = null;
         };
-      }, [userId, key, persistLocal, bridgeVersion]);
+      }, [userId, key, persistLocal, bridgeVersion, firestoreFieldKey]);
 
       const setStateWithSync = useCallback((updater) => {
         setState(prevState => {
@@ -695,7 +698,7 @@
           const next = cloneValue(resolved);
           persistLocal(next);
           const docRefSnapshot = docRefRef.current;
-          if(docRefSnapshot && !applyingRemote.current){
+          if(docRefSnapshot && !applyingRemote.current && firestoreFieldKey){
             const firebaseBridge = getFirebaseBridge();
             if(firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
               const { setDoc, ensureAuthUser } = firebaseBridge;
@@ -704,7 +707,7 @@
                 if(typeof ensureAuthUser === "function"){
                   await ensureAuthUser();
                 }
-                await setDoc(docRefSnapshot, { [key]: payload }, { merge: true });
+                await setDoc(docRefSnapshot, { [firestoreFieldKey]: payload }, { merge: true });
               }).then(() => {
                 setSyncError(null);
                 setIsUsingFirestore(true);
@@ -716,7 +719,7 @@
           }
           return next;
         });
-      }, [key, persistLocal]);
+      }, [key, persistLocal, firestoreFieldKey]);
 
       const meta = useMemo(() => ({ isUsingFirestore, isLoading, syncError }), [isUsingFirestore, isLoading, syncError]);
 
