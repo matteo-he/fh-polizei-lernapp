@@ -555,6 +555,17 @@
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
       const localValueRef = React.useRef(cloneValue(stableInitial));
+      const firestoreBlockedRef = React.useRef(false);
+
+      const blockFirestoreSync = useCallback((message) => {
+        firestoreBlockedRef.current = true;
+        setIsUsingFirestore(false);
+        setIsLoading(false);
+        if(message){
+          setSyncError(message);
+        }
+        docRefRef.current = null;
+      }, []);
 
       useEffect(() => {
         if(!storageKey){
@@ -604,6 +615,12 @@
 
       useEffect(() => {
         if(!userId){
+          setIsUsingFirestore(false);
+          setIsLoading(false);
+          docRefRef.current = null;
+          return;
+        }
+        if(firestoreBlockedRef.current){
           setIsUsingFirestore(false);
           setIsLoading(false);
           docRefRef.current = null;
@@ -690,6 +707,12 @@
                 setIsLoading(false);
                 return;
               }
+              if(error && error.code === 'permission-denied'){
+                blockFirestoreSync(formatFirestoreError(error, 'Fortschritt konnte nicht aus Firestore geladen werden.', {
+                  permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }). Fortschritt wird jetzt nur lokal gespeichert.`,
+                }));
+                return;
+              }
               console.error('[Firestore] Fortschritt-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Fortschritt konnte nicht aus Firestore geladen werden.', {
                 permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
@@ -708,6 +731,12 @@
             if(error && error.code === 'permission-denied' && docChoiceIndex > 0){
               setDocChoiceIndex(0);
               setIsLoading(false);
+              return;
+            }
+            if(error && error.code === 'permission-denied'){
+              blockFirestoreSync(formatFirestoreError(error, 'Firestore konnte für den Fortschritt nicht initialisiert werden.', {
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }). Fortschritt wird jetzt nur lokal gespeichert.`,
+              }));
               return;
             }
             console.error('[Firestore] Fortschritt-Initialisierung fehlgeschlagen', error);
@@ -730,6 +759,9 @@
           const resolved = typeof updater === 'function' ? updater(previous) : updater;
           const next = cloneValue(resolved);
           persistLocal(next);
+          if(firestoreBlockedRef.current){
+            return next;
+          }
           const docRefSnapshot = docRefRef.current;
           if(docRefSnapshot && !applyingRemote.current && firestoreFieldKey){
             const firebaseBridge = getFirebaseBridge();
