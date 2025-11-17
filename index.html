@@ -1041,6 +1041,25 @@
 
       const adminExists = useMemo(() => users.some(u => u.role === "admin"), [users]);
 
+      const upsertUserInFirestore = useCallback((user) => {
+        const firebaseBridge = getFirebaseBridge();
+        const normalized = normalizeUserForStorage(user);
+        if(!firebaseBridge || !normalized) return;
+        const { ensureApp, getFirestore, doc, setDoc, ensureAuthUser } = firebaseBridge;
+        if(typeof ensureApp !== "function" || typeof getFirestore !== "function" || typeof doc !== "function" || typeof setDoc !== "function") return;
+        (async () => {
+          try{
+            if(typeof ensureAuthUser === "function"){ await ensureAuthUser(); }
+            const app = ensureApp();
+            const db = getFirestore(app);
+            const ref = doc(db, FIRESTORE_USERS_COLLECTION, normalized.id);
+            await setDoc(ref, normalized, { merge: true });
+          }catch(error){
+            console.error('[Firestore] Nutzer konnte nicht geschrieben werden', error);
+          }
+        })();
+      }, []);
+
       const handleLogin = (e) => {
         e.preventDefault();
         setError("");
@@ -1053,6 +1072,7 @@
           return;
         }
         onLogin(user.id);
+        upsertUserInFirestore(user);
         setUsername("");
         setPassword("");
         setAdminCode("");
@@ -1077,6 +1097,7 @@
         setUsers(prev => [...prev, newUser]);
         setInfo(role === "admin" ? "Neuer Admin angelegt." : "Neuer Nutzer angelegt.");
         onLogin(newUser.id);
+        upsertUserInFirestore(newUser);
         setUsername("");
         setPassword("");
         setAdminCode("");
