@@ -1525,6 +1525,11 @@ service cloud.firestore {
     match /${FIRESTORE_COLLECTION}/{docId} {
       allow read, write: if request.auth != null;
     }
+
+    // Fallback: alle anderen Zugriffe blockieren
+    match /{document=**} {
+      allow read, write: if false;
+    }
   }
 }`;
 
@@ -1621,7 +1626,7 @@ service cloud.firestore {
                 <p>Der Zugriff auf Firestore wird aktuell blockiert. So richtest du den Lese-/Schreibzugriff für Fortschritt und Profile ein:</p>
                 <ul className="list-disc ml-5 space-y-1">
                   <li>Aktiviere <strong>anonyme Anmeldung</strong> in der Firebase-Konsole (Authentication → Sign-in method).</li>
-                  <li>Setze in Firestore die folgenden Sicherheitsregeln und veröffentliche sie:</li>
+                  <li>Ersetze den kompletten Inhalt deiner Firestore-Regeln mit dem folgenden Block und veröffentliche ihn:</li>
                 </ul>
                 <pre className="bg-gray-900 text-gray-100 text-xs p-3 rounded-lg overflow-x-auto"><code>{rulesSnippet}</code></pre>
                 <p className="text-xs text-amber-900 dark:text-amber-200">Die Progress-Dokumente sind damit pro UID isoliert (<code>userProgress/{"${userId}"}</code>). Falls du eigene Regeln verwendest, stelle sicher, dass <code>request.auth.uid</code> auf die jeweilige Dokument-ID passt.</p>
