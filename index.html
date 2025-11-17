@@ -644,9 +644,14 @@
                 const docRefSnapshot = docRefRef.current;
                 const firebaseBridge = getFirebaseBridge();
                 if(docRefSnapshot && firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
-                  const { setDoc } = firebaseBridge;
+                  const { setDoc, ensureAuthUser } = firebaseBridge;
                   const payload = cloneValue(localValueRef.current);
-                  syncQueue.current = syncQueue.current.then(() => setDoc(docRefSnapshot, { [key]: payload }, { merge: true })).catch(error => {
+                  syncQueue.current = syncQueue.current.then(async () => {
+                    if(typeof ensureAuthUser === "function"){
+                      await ensureAuthUser();
+                    }
+                    await setDoc(docRefSnapshot, { [key]: payload }, { merge: true });
+                  }).catch(error => {
                     console.error('[Firestore] Fortschritt konnte nicht initial hochgeladen werden', error);
                     setSyncError('Lokaler Fortschritt konnte nicht nach Firestore übertragen werden.');
                   });
@@ -659,6 +664,13 @@
                 permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
               }));
               setIsLoading(false);
+              if(!cancelled && error && error.code === 'permission-denied' && typeof ensureAuthUser === 'function'){
+                ensureAuthUser().then(() => {
+                  setBridgeVersion((v) => v + 1);
+                }).catch((authError) => {
+                  console.warn('[Firestore] Re-Auth nach Berechtigungsfehler fehlgeschlagen', authError);
+                });
+              }
             });
           }catch(error){
             if(cancelled) return;
@@ -686,9 +698,14 @@
           if(docRefSnapshot && !applyingRemote.current){
             const firebaseBridge = getFirebaseBridge();
             if(firebaseBridge && typeof firebaseBridge.setDoc === 'function'){
-              const { setDoc } = firebaseBridge;
+              const { setDoc, ensureAuthUser } = firebaseBridge;
               const payload = cloneValue(next);
-              syncQueue.current = syncQueue.current.then(() => setDoc(docRefSnapshot, { [key]: payload }, { merge: true })).then(() => {
+              syncQueue.current = syncQueue.current.then(async () => {
+                if(typeof ensureAuthUser === "function"){
+                  await ensureAuthUser();
+                }
+                await setDoc(docRefSnapshot, { [key]: payload }, { merge: true });
+              }).then(() => {
                 setSyncError(null);
                 setIsUsingFirestore(true);
               }).catch(error => {
@@ -1549,7 +1566,9 @@
 
     function UserApp({ activeUser, users, setUsers, setActiveUserId, theme, setTheme, questions, setQuestions, questionMeta, userMeta }){
       const userId = activeUser.id;
-      const [view, setView] = useUserLocalStorage(userId, "view", "dashboard");
+      const viewState = useUserLocalStorage(userId, "view", "dashboard");
+      const [view, setView] = viewState;
+      const progressMeta = viewState?.meta || {};
       const [mode, setMode] = useUserLocalStorage(userId, "mode", "training");
       const [filter, setFilter] = useUserLocalStorage(userId, "filter", DEFAULT_FILTER);
       const [review, setReview] = useUserLocalStorage(userId, "review", []);
@@ -1741,6 +1760,20 @@
       const activeQuestion = showExplain && lockedQuestion ? lockedQuestion : current;
       const activeIdx = showExplain && lockedIdx !== null ? lockedIdx : idx;
 
+      const progressStatus = (() => {
+        if(!userId) return null;
+        if(progressMeta.syncError){
+          return { tone: 'error', text: progressMeta.syncError };
+        }
+        if(progressMeta.isLoading){
+          return { tone: 'info', text: 'Fortschritt wird mit Firestore verbunden …' };
+        }
+        if(progressMeta.isUsingFirestore){
+          return null;
+        }
+        return { tone: 'warning', text: 'Fortschritt wird derzeit nur lokal gespeichert. Prüfe die Firestore-Regeln für "userProgress" oder die anonyme Anmeldung.' };
+      })();
+
       return (
         <div className="max-w-5xl mx-auto p-6 space-y-6">
           {userSyncError ? (
@@ -1750,6 +1783,16 @@
           ) : usersUsingFirestore ? (
             <div className="p-3 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">Profiländerungen werden automatisch zwischen Geräten synchronisiert.</div>
           ) : null}
+
+          {progressStatus && (
+            <div className={`p-3 rounded-xl border ${progressStatus.tone === 'error'
+              ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/30 dark:border-red-700 dark:text-red-100'
+              : progressStatus.tone === 'info'
+              ? 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-100'
+              : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-100'}`}>
+              {progressStatus.text}
+            </div>
+          )}
 
           <UserSwitcher users={users} activeUser={activeUser} onLogout={()=>setActiveUserId(null)} onSwitch={setActiveUserId} />
 
