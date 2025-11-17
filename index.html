@@ -380,10 +380,6 @@
         return () => window.removeEventListener('firebase-bridge-ready', handler);
       }, []);
 
-      useEffect(() => {
-        setDocChoiceIndex(0);
-      }, [userId]);
-
       const persistLocal = useCallback((list) => {
         try{ localStorage.setItem("users", JSON.stringify(list)); }catch{}
       }, []);
