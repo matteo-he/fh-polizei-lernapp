@@ -37,47 +37,53 @@
 
     let resolveAuthReady;
     let rejectAuthReady;
-    const authReady = new Promise((resolve, reject) => {
-      resolveAuthReady = resolve;
-      rejectAuthReady = reject;
-    });
+    let authReady;
 
-    let stopAuthListener;
-    let shouldStopAuthListener = false;
-    const stopAuthListenerIfReady = () => {
-      if(typeof stopAuthListener === 'function'){
-        stopAuthListener();
-        stopAuthListener = () => {};
-        shouldStopAuthListener = false;
-      } else {
-        shouldStopAuthListener = true;
-      }
+    const resetAuthReady = () => {
+      authReady = new Promise((resolve, reject) => {
+        resolveAuthReady = resolve;
+        rejectAuthReady = reject;
+      });
     };
-    stopAuthListener = onAuthStateChanged(auth, (user) => {
+
+    const triggerAnonSignIn = () => {
+      signInAnonymously(auth).catch((error) => {
+        console.error('[Firebase] Anonyme Anmeldung fehlgeschlagen', error);
+        if(typeof rejectAuthReady === 'function'){
+          rejectAuthReady(error);
+        }
+        resetAuthReady();
+      });
+    };
+
+    resetAuthReady();
+
+    onAuthStateChanged(auth, (user) => {
       if(user && typeof resolveAuthReady === 'function'){
         resolveAuthReady(user);
-        stopAuthListenerIfReady();
+        resolveAuthReady = null;
+        rejectAuthReady = null;
       }
     }, (error) => {
+      console.error('[Firebase] Auth-Listener-Fehler', error);
       if(typeof rejectAuthReady === 'function'){
         rejectAuthReady(error);
       }
-      stopAuthListenerIfReady();
+      resetAuthReady();
     });
-    if(shouldStopAuthListener){
-      stopAuthListenerIfReady();
-    }
 
-    signInAnonymously(auth).catch((error) => {
-      console.error('[Firebase] Anonyme Anmeldung fehlgeschlagen', error);
-      if(typeof rejectAuthReady === 'function'){
-        rejectAuthReady(error);
+    triggerAnonSignIn();
+
+    async function ensureAuthUser(){
+      if(auth.currentUser) return auth.currentUser;
+      try{
+        return await authReady;
+      }catch(error){
+        console.warn('[Firebase] Auth nicht bereit, erneuter Anmeldeversuch …', error);
+        resetAuthReady();
+        triggerAnonSignIn();
+        return authReady;
       }
-      stopAuthListenerIfReady();
-    });
-
-    function ensureAuthUser(){
-      return authReady;
     }
 
     window.FIREBASE_BRIDGE = {
