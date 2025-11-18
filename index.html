@@ -1923,7 +1923,13 @@ service cloud.firestore {
                         const data=JSON.parse(text);
                         const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) && Array.isArray(q.tags));
                         if(!ok){ alert('Ungültiges Format.'); return; }
-                        setQuestions(data);
+                        setQuestions(prev => {
+                          const prevList = Array.isArray(prev) ? prev : [];
+                          const merged = new Map();
+                          prevList.forEach(q => { if(q && q.id) merged.set(q.id, q); });
+                          data.forEach(q => { if(q && q.id) merged.set(q.id, q); });
+                          return Array.from(merged.values());
+                        });
                         alert(`Import erfolgreich: ${data.length} Fragen übernommen.`);
                       }catch{ alert('Ungültiges JSON'); }
                     }}/>
