@@ -897,7 +897,7 @@
                     .filter(Boolean)
                     .filter(localQuestion => !remoteIds.has(localQuestion.id) && !tombstoneSet.has(localQuestion.id))
                 );
-                if(missingLocals.length){
+                if(missingLocals.length || removedFromRemote){
                   nextQuestions = sortQuestionsById([...remoteQuestions, ...missingLocals]);
                   pushChangesToFirestore(remoteQuestionsRaw, nextQuestions);
                 }
