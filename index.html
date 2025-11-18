@@ -1479,6 +1479,14 @@ service cloud.firestore {
         setError("");
       };
 
+      const deleteQuestion = (id) => {
+        const confirmed = window.confirm(`Frage ${id} löschen?`);
+        if(!confirmed) return;
+        setQuestions(prev => prev.filter(q => q.id !== id));
+        setMessage(`Frage ${id} gelöscht.`);
+        setError("");
+      };
+
       const seedDefaultQuestions = () => {
         if(!DEFAULT_QUESTIONS.length) return;
         const confirmed = window.confirm('Standardfragen übernehmen? Dadurch werden bestehende Fragen überschrieben.');
@@ -1586,7 +1594,10 @@ service cloud.firestore {
                     <div className="text-sm text-gray-600 dark:text-gray-300">{q.question}</div>
                     <div className="mt-1 text-xs text-gray-500 dark:text-gray-400">Tags: {q.tags.join(', ')} · Stand: {q.last_checked}</div>
                   </div>
-                  <button onClick={()=>startEdit(q)} className="px-3 py-2 rounded-lg border dark:border-gray-600">Bearbeiten</button>
+                  <div className="flex items-center gap-2">
+                    <button onClick={()=>startEdit(q)} className="px-3 py-2 rounded-lg border dark:border-gray-600">Bearbeiten</button>
+                    <button onClick={()=>deleteQuestion(q.id)} className="px-3 py-2 rounded-lg bg-red-600 text-white">Löschen</button>
+                  </div>
                 </div>
               ))}
               {!sortedQuestions.length && <div className="text-sm text-gray-500">Keine Fragen vorhanden.</div>}
