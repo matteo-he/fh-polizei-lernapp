@@ -882,6 +882,7 @@
                   return Array.from(set);
                 });
               }
+              const removedFromRemote = remoteTombstones.length > 0;
               const tombstoneSet = new Set([...(Array.isArray(deletedQuestionIds) ? deletedQuestionIds : []), ...remoteTombstones]);
               const remoteQuestionsRaw = sortQuestionsById(remoteSanitized.filter(item => !item.__deleted));
               const remoteQuestions = remoteQuestionsRaw.filter(q => !tombstoneSet.has(q.id));
