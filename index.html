@@ -749,6 +749,7 @@
     function useQuestions(){
       const [bridgeVersion, setBridgeVersion] = useState(() => window.__FIREBASE_BRIDGE_READY__ ? 1 : 0);
       const { config, isValid } = getFirebaseConfigInfo();
+      const [deletedQuestionIds, setDeletedQuestionIds] = useLocalStorage("deletedQuestionIds", []);
       const [questionsState, setQuestionsState] = useState(() => {
         try {
           const saved = JSON.parse(localStorage.getItem('questions') || 'null');
@@ -771,6 +772,12 @@
       useEffect(() => {
         questionsStateRef.current = questionsState;
       }, [questionsState]);
+
+      useEffect(() => {
+        const tombstoneSet = new Set(Array.isArray(deletedQuestionIds) ? deletedQuestionIds : []);
+        if(!tombstoneSet.size) return;
+        setQuestionsState(prev => (Array.isArray(prev) ? prev : []).filter(q => q && !tombstoneSet.has(q.id)));
+      }, [deletedQuestionIds]);
 
       useEffect(() => {
         const handler = () => setBridgeVersion(v => v + 1);
@@ -856,27 +863,32 @@
             const collectionRef = collection(db, FIRESTORE_COLLECTION);
             unsubscribe = onSnapshot(collectionRef, (snapshot) => {
               if(cancelled) return;
-              const remoteQuestions = sortQuestionsById(
+              const tombstoneSet = new Set(Array.isArray(deletedQuestionIds) ? deletedQuestionIds : []);
+              const remoteQuestionsRaw = sortQuestionsById(
                 snapshot.docs
                   .map(doc => sanitizeQuestionFromRemote(doc.data(), doc.id))
                   .filter(Boolean)
               );
-              const previousQuestions = sortQuestionsById(Array.isArray(questionsStateRef.current) ? questionsStateRef.current : []);
+              const remoteQuestions = remoteQuestionsRaw.filter(q => !tombstoneSet.has(q.id));
+              const previousQuestions = sortQuestionsById(
+                (Array.isArray(questionsStateRef.current) ? questionsStateRef.current : []).filter(q => q && !tombstoneSet.has(q.id))
+              );
               let nextQuestions = remoteQuestions;
+              const removedFromRemote = remoteQuestionsRaw.length !== remoteQuestions.length;
               if(!remoteQuestions.length && previousQuestions.length){
                 nextQuestions = previousQuestions;
-                pushChangesToFirestore(remoteQuestions, nextQuestions);
+                pushChangesToFirestore(remoteQuestionsRaw, nextQuestions);
               } else if(remoteQuestions.length){
                 const remoteIds = new Set(remoteQuestions.map(q => q.id));
                 const missingLocals = sortQuestionsById(
                   previousQuestions
                     .map(item => normalizeQuestionForStorage(item))
                     .filter(Boolean)
-                    .filter(localQuestion => !remoteIds.has(localQuestion.id))
+                    .filter(localQuestion => !remoteIds.has(localQuestion.id) && !tombstoneSet.has(localQuestion.id))
                 );
-                if(missingLocals.length){
+                if(missingLocals.length || removedFromRemote){
                   nextQuestions = sortQuestionsById([...remoteQuestions, ...missingLocals]);
-                  pushChangesToFirestore(remoteQuestions, nextQuestions);
+                  pushChangesToFirestore(remoteQuestionsRaw, nextQuestions);
                 }
               }
               applyingRemote.current = true;
@@ -918,13 +930,24 @@
           const nextSanitized = Array.isArray(resolved)
             ? resolved.map(item => normalizeQuestionForStorage(item)).filter(Boolean)
             : previous;
+          const removedIds = previous
+            .filter(q => q && q.id && !nextSanitized.some(n => n && n.id === q.id))
+            .map(q => q.id);
+          if(removedIds.length || nextSanitized.length){
+            setDeletedQuestionIds(prev => {
+              const set = new Set(Array.isArray(prev) ? prev : []);
+              removedIds.forEach(id => set.add(id));
+              nextSanitized.forEach(q => { if(q && q.id) set.delete(q.id); });
+              return Array.from(set);
+            });
+          }
           persistLocal(nextSanitized);
           if(firestoreRef.current && !applyingRemote.current){
             pushChangesToFirestore(previous, nextSanitized);
           }
           return nextSanitized;
         });
-      }, [persistLocal, pushChangesToFirestore]);
+      }, [persistLocal, pushChangesToFirestore, setDeletedQuestionIds]);
 
       return {
         questions: questionsState,
@@ -1906,36 +1929,38 @@ service cloud.firestore {
                 <div className="bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">Keine Fragen im aktuellen Filter.</div>
               )}
 
-              <div className="mt-8 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">
-                <h3 className="font-semibold mb-2">Fragen importieren/exportieren (JSON)</h3>
-                <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">Format: [{"{"}"id","question","choices":[5],"correct":[0,2,4],"explain":"...","law_ref":"...","tags":[...],"last_checked":"YYYY-MM-DD","difficulty":1{"}"}]</p>
-                <div className="flex gap-2 flex-wrap">
-                  <button className="px-3 py-2 rounded-lg border dark:border-gray-600" onClick={() => {
-                    const blob = new Blob([JSON.stringify(questions, null, 2)], { type: 'application/json' });
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a'); a.href = url; a.download = 'fragenbank-demo.json'; a.click(); URL.revokeObjectURL(url);
-                  }}>Export</button>
+              {activeUser.role === 'admin' && (
+                <div className="mt-8 bg-white dark:bg-gray-800 dark:text-gray-100 rounded-2xl shadow p-6">
+                  <h3 className="font-semibold mb-2">Fragen importieren/exportieren (JSON)</h3>
+                  <p className="text-sm text-gray-600 dark:text-gray-300 mb-3">Format: [{"{"}"id","question","choices":[5],"correct":[0,2,4],"explain":"...","law_ref":"...","tags":[...],"last_checked":"YYYY-MM-DD","difficulty":1{"}"}]</p>
+                  <div className="flex gap-2 flex-wrap">
+                    <button className="px-3 py-2 rounded-lg border dark:border-gray-600" onClick={() => {
+                      const blob = new Blob([JSON.stringify(questions, null, 2)], { type: 'application/json' });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement('a'); a.href = url; a.download = 'fragenbank-demo.json'; a.click(); URL.revokeObjectURL(url);
+                    }}>Export</button>
 
-                  <label className="px-3 py-2 rounded-lg border cursor-pointer dark:border-gray-600">Import
-                    <input type="file" accept="application/json" className="hidden" onChange={async (e)=>{
-                      const file=e.target.files?.[0]; if(!file) return; const text=await file.text();
-                      try{
-                        const data=JSON.parse(text);
-                        const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) && Array.isArray(q.tags));
-                        if(!ok){ alert('Ungültiges Format.'); return; }
-                        setQuestions(prev => {
-                          const prevList = Array.isArray(prev) ? prev : [];
-                          const merged = new Map();
-                          prevList.forEach(q => { if(q && q.id) merged.set(q.id, q); });
-                          data.forEach(q => { if(q && q.id) merged.set(q.id, q); });
-                          return Array.from(merged.values());
-                        });
-                        alert(`Import erfolgreich: ${data.length} Fragen übernommen.`);
-                      }catch{ alert('Ungültiges JSON'); }
-                    }}/>
-                  </label>
+                    <label className="px-3 py-2 rounded-lg border cursor-pointer dark:border-gray-600">Import
+                      <input type="file" accept="application/json" className="hidden" onChange={async (e)=>{
+                        const file=e.target.files?.[0]; if(!file) return; const text=await file.text();
+                        try{
+                          const data=JSON.parse(text);
+                          const ok = Array.isArray(data) && data.every(q => q && typeof q.id==="string" && typeof q.question==="string" && Array.isArray(q.choices) && q.choices.length===5 && Array.isArray(q.correct) && q.correct.every(n=>Number.isInteger(n)&&n>=0&&n<5) && Array.isArray(q.tags));
+                          if(!ok){ alert('Ungültiges Format.'); return; }
+                          setQuestions(prev => {
+                            const prevList = Array.isArray(prev) ? prev : [];
+                            const merged = new Map();
+                            prevList.forEach(q => { if(q && q.id) merged.set(q.id, q); });
+                            data.forEach(q => { if(q && q.id) merged.set(q.id, q); });
+                            return Array.from(merged.values());
+                          });
+                          alert(`Import erfolgreich: ${data.length} Fragen übernommen.`);
+                        }catch{ alert('Ungültiges JSON'); }
+                      }}/>
+                    </label>
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
 
