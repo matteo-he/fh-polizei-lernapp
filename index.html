@@ -308,8 +308,8 @@
 
     const DEFAULT_QUESTIONS = [
       { id: "bdg-43-ma-1", question:"§ 43 BDG: Wie hat ein Beamter seine dienstlichen Aufgaben zu erfüllen? Wählen Sie alle zutreffenden.", choices:["Unter Beachtung der geltenden Rechtsordnung.","Treu, gewissenhaft, engagiert und unparteiisch.","Nur nach ständiger Rücksprache mit dem unmittelbaren Vorgesetzten.","So, dass das Vertrauen der Allgemeinheit erhalten bleibt.","Primär an interne Dienstanweisungen, nicht an Gesetze, gebunden."], correct:[0,1,3], explain:"§ 43 BDG: Rechtstreue, Gewissenhaftigkeit, Engagement, Unparteilichkeit und Wahrung des Vertrauens der Allgemeinheit.", law_ref:"BDG § 43", tags:["BDG"], last_checked:"2025-11-11", difficulty:1 },
-      { id:"bdg-44-ma-1", question:"§ 44 BDG (Weisungen): In welchen Fällen ist zu remonstrieren/abzulehnen? Wählen Sie alle zutreffenden.", choices:["Wenn die Weisung von einem unzuständigen Organ erteilt wurde.","Wenn die Befolgung gegen verwaltungsrechtliche Vorschriften verstieße.","Wenn die Befolgung gegen strafrechtliche Vorschriften verstieße.","Wenn der Inhalt unklar ist und trotz Nachfrage unklar bleibt.","Wenn die Weisung mündlich erteilt wurde."], correct:[0,1,2,3], explain:"Unzuständigkeit oder Rechtswidrigkeit → Remonstrationspflicht; Mündlichkeit allein macht eine Weisung nicht unbeachtlich.", law_ref:"BDG § 44", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
-      { id:"bdg-43a-ma-1", question:"§ 43a BDG (achtungsvoller Umgang): Welche Aussagen treffen zu? Wählen Sie alle zutreffenden.", choices:["Beamte haben menschenwürdeverletzendes Verhalten zu unterlassen.","Vorgesetzte und Mitarbeiter begegnen einander mit Achtung.","Spontane Entgleisungen sind disziplinär immer irrelevant.","Vorgesetzte haben für achtungsvollen Umgang Sorge zu tragen.","§ 43a betrifft nur den Umgang mit Parteien."], correct:[0,1,3], explain:"§ 43a BDG verlangt würdevollen, diskriminierungsfreien Umgang; spontane Entgleisungen können relevant sein.", law_ref:"BDG § 43a", tags:["BDG"], last_checked:"2025-11-11", difficulty:1 },
+      { id:"bdg-44-ma-1", question:"§ 44 BDG (Weisungen): In welchen Fällen ist zu remonstrieren/abzulehnen? Wählen Sie alle zutreffenden.", choices:["Wenn die Weisung von einem unzuständigen Organ erteilt wurde.","Wenn die Befolgung gegen verwaltungsrechtliche Vorschriften verstoßen würde.","Wenn die Befolgung gegen strafrechtliche Vorschriften verstoßen würde.","Wenn der Inhalt unklar ist und trotz Nachfrage unklar bleibt.","Wenn die Weisung mündlich erteilt wurde."], correct:[0,1,2,3], explain:"Unzuständigkeit oder Rechtswidrigkeit → Remonstrationspflicht; Mündlichkeit allein macht eine Weisung nicht unbeachtlich.", law_ref:"BDG § 44", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
+      { id:"bdg-43a-ma-1", question:"§ 43a BDG (achtungsvoller Umgang): Welche Aussagen treffen zu? Wählen Sie alle zutreffenden.", choices:["Beamte haben menschenwürdeverletzender Verhalten zu unterlassen.","Vorgesetzte und Mitarbeiter begegnen einander mit Achtung.","Spontane Entgleisungen sind disziplinär immer irrelevant.","Vorgesetzte haben für achtungsvollen Umgang Sorge zu tragen.","§ 43a betrifft nur den Umgang mit Parteien."], correct:[0,1,3], explain:"§ 43a BDG verlangt würdevollen, diskriminierungsfreien Umgang; spontane Entgleisungen können relevant sein.", law_ref:"BDG § 43a", tags:["BDG"], last_checked:"2025-11-11", difficulty:1 },
       { id:"bdg-39-ma-1", question:"§ 39 BDG (Dienstzuteilung): Unter welchen Bedingungen ist eine Zuteilung ohne schriftliche Zustimmung über 90 Tage zulässig? Wählen Sie alle zutreffenden.", choices:["Wenn der Dienstbetrieb auf andere Weise nicht aufrechterhalten werden kann.","Wenn sie zum Zwecke einer Ausbildung erfolgt.","Wenn wichtige private Gründe vorliegen.","Wenn der Kommandant der entsendenden Dienststelle zustimmt.","Wenn der Kommandant der Zuteilungsdienststelle zustimmt."], correct:[0,1], explain:">90 Tage ohne Zustimmung: nur zur Aufrechterhaltung des Dienstbetriebs oder zu Ausbildungszwecken.", law_ref:"BDG § 39", tags:["BDG"], last_checked:"2025-11-11", difficulty:2 },
     ];
 
@@ -496,7 +496,7 @@
               if(cancelled) return;
               console.error('[Firestore] Nutzer-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Nutzer konnten nicht aus Firestore geladen werden.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_USERS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_USERS_COLLECTION}/{docId} { allow read: if true; }).`,
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_USERS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_USERS_COLLECTION}/{docId} { allow read: if true; }).`,
               }));
               setIsLoading(false);
             });
@@ -504,7 +504,7 @@
             if(cancelled) return;
             console.error('[Firestore] Nutzer-Initialisierung fehlgeschlagen', error);
             setSyncError(formatFirestoreError(error, 'Firestore konnte für Nutzer nicht initialisiert werden.', {
-              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_USERS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_USERS_COLLECTION}/{docId} { allow read: if true; }).`,
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_USERS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_USERS_COLLECTION}/{docId} { allow read: if true; }).`,
             }));
             setIsLoading(false);
           }
@@ -547,25 +547,12 @@
       const [isLoading, setIsLoading] = useState(false);
       const [syncError, setSyncError] = useState(null);
 
-      const [docChoiceIndex, setDocChoiceIndex] = useState(0);
-
       const firestoreFieldKey = useMemo(() => (userId ? `${userId}:${key}` : null), [userId, key]);
 
       const docRefRef = React.useRef(null);
       const applyingRemote = React.useRef(false);
       const syncQueue = React.useRef(Promise.resolve());
       const localValueRef = React.useRef(cloneValue(stableInitial));
-      const firestoreBlockedRef = React.useRef(false);
-
-      const blockFirestoreSync = useCallback((message) => {
-        firestoreBlockedRef.current = true;
-        setIsUsingFirestore(false);
-        setIsLoading(false);
-        if(message){
-          setSyncError(message);
-        }
-        docRefRef.current = null;
-      }, []);
 
       useEffect(() => {
         if(!storageKey){
@@ -603,10 +590,6 @@
         return () => window.removeEventListener('firebase-bridge-ready', handler);
       }, []);
 
-      useEffect(() => {
-        setDocChoiceIndex(0);
-      }, [userId]);
-
       const persistLocal = useCallback((value) => {
         if(!storageKey) return;
         localValueRef.current = cloneValue(value);
@@ -615,12 +598,6 @@
 
       useEffect(() => {
         if(!userId){
-          setIsUsingFirestore(false);
-          setIsLoading(false);
-          docRefRef.current = null;
-          return;
-        }
-        if(firestoreBlockedRef.current){
           setIsUsingFirestore(false);
           setIsLoading(false);
           docRefRef.current = null;
@@ -645,30 +622,19 @@
         setIsLoading(true);
         (async () => {
           try{
-            const authUser = typeof ensureAuthUser === "function" ? await ensureAuthUser() : null;
-            if(!authUser || !authUser.uid){
-              throw new Error('Kein Auth-User für Fortschritt verfügbar');
+            if(typeof ensureAuthUser === "function"){
+              await ensureAuthUser();
             }
-            const docVariants = [];
-            docVariants.push({ id: authUser.uid, label: 'auth' });
-            if(userId && userId !== authUser.uid){
-              docVariants.push({ id: userId, label: 'profile' });
-            }
-            if(docVariants.length === 0){
-              throw new Error('Keine geeignete Dokument-ID für Fortschritt gefunden');
-            }
-            const choiceIndex = Math.min(docChoiceIndex, docVariants.length - 1);
-            if(choiceIndex !== docChoiceIndex){
-              setDocChoiceIndex(choiceIndex);
-              setIsLoading(false);
-              return;
-            }
-            const { id: chosenDocId } = docVariants[choiceIndex];
+            
+            // WICHTIG: Verwende IMMER die lokale userId als Dokument-ID
+            const docId = userId;
+            
             const app = ensureApp();
             const db = getFirestore(app);
-            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, chosenDocId);
+            const docRef = doc(db, FIRESTORE_PROGRESS_COLLECTION, docId);
             docRefRef.current = docRef;
             syncQueue.current = Promise.resolve();
+            
             unsubscribe = onSnapshot(docRef, (snapshot) => {
               if(cancelled) return;
               const data = snapshot.exists() ? (snapshot.data() || {}) : {};
@@ -681,6 +647,7 @@
               setIsUsingFirestore(true);
               setIsLoading(false);
               setSyncError(null);
+              
               if(!hasKey){
                 const docRefSnapshot = docRefRef.current;
                 const firebaseBridge = getFirebaseBridge();
@@ -700,48 +667,17 @@
               }
             }, (error) => {
               if(cancelled) return;
-              if(error && error.code === 'permission-denied' && docChoiceIndex + 1 < docVariants.length){
-                console.warn(`[Firestore] Fortschritt-Listener mit Doc-ID ${chosenDocId} blockiert, versuche nächsten Kandidaten`);
-                if(typeof unsubscribe === 'function') unsubscribe();
-                setDocChoiceIndex((i) => Math.min(i + 1, docVariants.length - 1));
-                setIsLoading(false);
-                return;
-              }
-              if(error && error.code === 'permission-denied'){
-                blockFirestoreSync(formatFirestoreError(error, 'Fortschritt konnte nicht aus Firestore geladen werden.', {
-                  permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }). Fortschritt wird jetzt nur lokal gespeichert.`,
-                }));
-                return;
-              }
               console.error('[Firestore] Fortschritt-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Fortschritt konnte nicht aus Firestore geladen werden.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }). Fortschritt wird jetzt nur lokal gespeichert.`,
               }));
               setIsLoading(false);
-              if(!cancelled && error && error.code === 'permission-denied' && typeof ensureAuthUser === 'function'){
-                ensureAuthUser().then(() => {
-                  setBridgeVersion((v) => v + 1);
-                }).catch((authError) => {
-                  console.warn('[Firestore] Re-Auth nach Berechtigungsfehler fehlgeschlagen', authError);
-                });
-              }
             });
           }catch(error){
             if(cancelled) return;
-            if(error && error.code === 'permission-denied' && docChoiceIndex > 0){
-              setDocChoiceIndex(0);
-              setIsLoading(false);
-              return;
-            }
-            if(error && error.code === 'permission-denied'){
-              blockFirestoreSync(formatFirestoreError(error, 'Firestore konnte für den Fortschritt nicht initialisiert werden.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }). Fortschritt wird jetzt nur lokal gespeichert.`,
-              }));
-              return;
-            }
             console.error('[Firestore] Fortschritt-Initialisierung fehlgeschlagen', error);
             setSyncError(formatFirestoreError(error, 'Firestore konnte für den Fortschritt nicht initialisiert werden.', {
-              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Prüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_PROGRESS_COLLECTION}" freigeben (z. B. match /databases/{database}/documents/${FIRESTORE_PROGRESS_COLLECTION}/{docId} { allow read, write: if true; }).`,
             }));
             setIsLoading(false);
           }
@@ -751,7 +687,7 @@
           if(typeof unsubscribe === 'function') unsubscribe();
           docRefRef.current = null;
         };
-      }, [userId, key, persistLocal, bridgeVersion, firestoreFieldKey, docChoiceIndex]);
+      }, [userId, key, persistLocal, bridgeVersion, firestoreFieldKey]);
 
       const setStateWithSync = useCallback((updater) => {
         setState(prevState => {
@@ -759,9 +695,7 @@
           const resolved = typeof updater === 'function' ? updater(previous) : updater;
           const next = cloneValue(resolved);
           persistLocal(next);
-          if(firestoreBlockedRef.current){
-            return next;
-          }
+          
           const docRefSnapshot = docRefRef.current;
           if(docRefSnapshot && !applyingRemote.current && firestoreFieldKey){
             const firebaseBridge = getFirebaseBridge();
@@ -956,7 +890,7 @@
               if(cancelled) return;
               console.error('[Firestore] Echtzeit-Listener-Fehler', error);
               setSyncError(formatFirestoreError(error, 'Live-Aktualisierung aus Firestore fehlgeschlagen.', {
-                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
+                permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
               }));
               setIsLoading(false);
             });
@@ -964,7 +898,7 @@
             if(cancelled) return;
             console.error('[Firestore] Initialisierung fehlgeschlagen', error);
             setSyncError(formatFirestoreError(error, 'Firestore konnte nicht initialisiert werden.', {
-              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
+              permissionDeniedHint: `Firestore hat den Zugriff verweigert. Überprüfe, ob deine Sicherheitsregeln die Collection "${FIRESTORE_COLLECTION}" abdecken (z. B. match /databases/{database}/documents/${FIRESTORE_COLLECTION}/{docId} { allow read: if true; }). Melde dich alternativ mit einem berechtigten Konto an.`,
             }));
             setIsLoading(false);
           }
@@ -1202,7 +1136,7 @@
             <div className="flex justify-between items-center mb-4">
               <h1 className="text-xl font-semibold">Lerntool E1 / E2a</h1>
               <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className="px-3 py-1 rounded-full border dark:border-gray-600 text-sm">
-                {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
+                {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
               </button>
             </div>
             <div className="flex gap-2 mb-4">
@@ -1212,7 +1146,7 @@
             {usersSyncError ? (
               <div className="mb-3 text-sm text-red-600 dark:text-red-400">{usersSyncError}</div>
             ) : usersLoading ? (
-              <div className="mb-3 text-sm text-blue-600 dark:text-blue-400">Synchronisiere Profile …</div>
+              <div className="mb-3 text-sm text-blue-600 dark:text-blue-400">Synchronisiere Profile …</div>
             ) : usersUsingFirestore ? (
               <div className="mb-3 text-xs text-green-600 dark:text-green-400">Profile werden automatisch mit Firestore abgeglichen.</div>
             ) : null}
@@ -1517,7 +1451,7 @@
 service cloud.firestore {
   match /databases/{database}/documents {
     match /${FIRESTORE_PROGRESS_COLLECTION}/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null;
     }
     match /${FIRESTORE_USERS_COLLECTION}/{userId} {
       allow read, write: if request.auth != null;
@@ -1629,7 +1563,7 @@ service cloud.firestore {
                   <li>Ersetze den kompletten Inhalt deiner Firestore-Regeln mit dem folgenden Block und veröffentliche ihn:</li>
                 </ul>
                 <pre className="bg-gray-900 text-gray-100 text-xs p-3 rounded-lg overflow-x-auto"><code>{rulesSnippet}</code></pre>
-                <p className="text-xs text-amber-900 dark:text-amber-200">Die Progress-Dokumente sind damit pro UID isoliert (<code>userProgress/{"${userId}"}</code>). Falls du eigene Regeln verwendest, stelle sicher, dass <code>request.auth.uid</code> auf die jeweilige Dokument-ID passt.</p>
+                <p className="text-xs text-amber-900 dark:text-amber-200">Die Progress-Dokumente sind damit pro User-ID isoliert. Die Regeln erlauben jedem angemeldeten User Lese-/Schreibzugriff.</p>
               </div>
             )}
             {firebaseConfigValid && !questions.length && (
@@ -1866,10 +1800,10 @@ service cloud.firestore {
           return { tone: 'error', text: progressMeta.syncError };
         }
         if(progressMeta.isLoading){
-          return { tone: 'info', text: 'Fortschritt wird mit Firestore verbunden …' };
+          return { tone: 'info', text: 'Fortschritt wird mit Firestore verbunden …' };
         }
         if(progressMeta.isUsingFirestore){
-          return null;
+          return { tone: 'success', text: 'Fortschritt wird geräteübergreifend synchronisiert ✓' };
         }
         return { tone: 'warning', text: 'Fortschritt wird derzeit nur lokal gespeichert. Prüfe die Firestore-Regeln für "userProgress" oder die anonyme Anmeldung.' };
       })();
@@ -1879,7 +1813,7 @@ service cloud.firestore {
           {userSyncError ? (
             <div className="p-3 rounded-xl bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-200">{userSyncError}</div>
           ) : usersLoading ? (
-            <div className="p-3 rounded-xl bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">Profile werden mit Firestore synchronisiert …</div>
+            <div className="p-3 rounded-xl bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-200">Profile werden mit Firestore synchronisiert …</div>
           ) : usersUsingFirestore ? (
             <div className="p-3 rounded-xl bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200">Profiländerungen werden automatisch zwischen Geräten synchronisiert.</div>
           ) : null}
@@ -1889,6 +1823,8 @@ service cloud.firestore {
               ? 'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/30 dark:border-red-700 dark:text-red-100'
               : progressStatus.tone === 'info'
               ? 'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/30 dark:border-blue-700 dark:text-blue-100'
+              : progressStatus.tone === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-900/30 dark:border-emerald-700 dark:text-emerald-100'
               : 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/30 dark:border-amber-700 dark:text-amber-100'}`}>
               {progressStatus.text}
             </div>
@@ -1911,7 +1847,7 @@ service cloud.firestore {
                   <button onClick={()=>setView('admin')} className={`px-3 py-1 rounded-full border ${view==='admin'? 'bg-white text-blue-700' : 'bg-transparent border-white text-white'}`}>Admin</button>
                 )}
                 <button onClick={()=>setTheme(theme==='dark'?'light':'dark')} className="px-3 py-1 rounded-full border bg-transparent border-white text-white hover:bg-white/10">
-                  {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
+                  {theme==='dark' ? '☀️ Light' : '🌙 Dark'}
                 </button>
               </div>
             </div>
